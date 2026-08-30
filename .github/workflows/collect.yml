@@ -1,0 +1,77 @@
+name: collect
+
+# Accumulates the state-wide price history. Nothing here can be backfilled: a
+# day missed is a day lost, which is why there are three attempts per day and
+# why writes only ever fill an empty slot.
+
+on:
+  schedule:
+    # 23:07 UTC puts every state between 07:07 and 10:07 local, which is inside
+    # the collector's sampling window year round including DST.
+    - cron: '7 23 * * *'
+    # Mid-morning retry, still inside the window for all states.
+    - cron: '37 2 * * *'
+    # Catch-up: fills any slot still empty, ignoring the local-hour window.
+    - cron: '7 6 * * *'
+  workflow_dispatch:
+    inputs:
+      catchup:
+        description: 'Fill empty slots regardless of local hour'
+        type: boolean
+        default: true
+
+# Two runs writing the same branch would race on push.
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # The published data lives on its own branch so that a year of daily
+      # commits does not bury the watchapp's history on main. Checking it out at
+      # ./docs matches where collect.js writes locally.
+      - name: Check out published data branch
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          path: docs
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No dependency install step: the pipeline is deliberately dependency-free.
+
+      - name: Collect
+        run: |
+          if [ "${{ github.event.schedule }}" = "7 6 * * *" ] || [ "${{ inputs.catchup }}" = "true" ]; then
+            node data/collect.js --catchup
+          else
+            node data/collect.js
+          fi
+
+      - name: Commit if changed
+        working-directory: docs
+        run: |
+          git config user.name  'aus-fuel-watch-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          if [ -z "$(git status --porcelain)" ]; then
+            echo 'no change'
+            exit 0
+          fi
+          git add -A
+          git commit -m "data: $(date -u +%Y-%m-%d) collection"
+          # A concurrent run may have pushed since checkout.
+          for attempt in 1 2 3; do
+            if git push; then exit 0; fi
+            git pull --rebase --autostash origin data || exit 1
+          done
+          exit 1

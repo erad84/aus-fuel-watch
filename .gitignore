@@ -1,0 +1,18 @@
+# The seed workbook is a manual FuelRadar export. Only the derived cycle params
+# in data/params.seed.json are committed; the underlying series is never
+# redistributed.
+*.xlsx
+*.xls
+*.csv
+data/seed/raw/
+
+# Published data lives on the `data` branch, which CI checks out here. Local
+# collector runs write here too, as scratch.
+/docs/
+
+node_modules/
+build/
+.lock-waf*
+*.pbw
+.DS_Store
+Thumbs.db
