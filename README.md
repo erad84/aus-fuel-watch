@@ -137,17 +137,24 @@ node data/seed/offset-check.js
 
 ## One-time repository setup
 
-1. Create the GitHub repository and push `main`.
-2. Create the published data branch:
-   ```bash
-   git switch --orphan data && git commit --allow-empty -m "init data branch" && git push -u origin data && git switch main
-   ```
-3. Settings → Pages → deploy from branch `data`, folder `/`.
-4. Settings → Actions → allow workflows to write to the repository.
-5. Settings → Secrets and variables → Actions → add `FUELCHECK_API_KEY` and
-   `FUELCHECK_API_SECRET` as repository secrets, using the values from your own
-   [api.nsw.gov.au](https://api.nsw.gov.au/Product/Index/22) registration.
-6. Run the `collect` workflow manually once to confirm it commits.
+Everything is committed locally on `main`; published JSON is on branch `data` with
+today's first collection already seeded (`v1/*.json`).
 
-Scheduled workflows are disabled after 60 days without repository activity, which is why
-`heartbeat.yml` pushes a trivial commit monthly.
+1. **Create an empty GitHub repository** (no README) e.g. `aus-fuel-watch`.
+
+2. **Push both branches** from WSL:
+
+   ```bash
+   cd "/mnt/e/Mark/webdev/Pebble watch/Aus Fuel Watch"
+   git remote set-url origin https://github.com/erad84/aus-fuel-watch.git
+   git push -u origin main
+   git push -u origin data
+   ```
+
+3. **Repository secrets and Pages** — follow [.github/ACTIONS_SETUP.md](.github/ACTIONS_SETUP.md)
+   (four API secrets, workflow write permission, Pages on `data` / root).
+
+4. **Run the collector** — Actions → `collect` → Run workflow.
+
+Scheduled times (UTC): 23:07, 02:37, 06:07. The `heartbeat` workflow keeps crons alive
+past GitHub's 60-day inactivity cutoff.
