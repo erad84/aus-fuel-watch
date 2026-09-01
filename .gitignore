@@ -6,6 +6,13 @@
 *.csv
 data/seed/raw/
 
+# API credentials. Loaded locally with `node --env-file=.env`, and supplied in
+# CI as repository secrets. Never commit these; .env.example carries the
+# placeholder shape instead.
+.env
+.env.*
+!.env.example
+
 # Published data lives on the `data` branch, which CI checks out here. Local
 # collector runs write here too, as scratch.
 /docs/

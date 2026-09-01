@@ -55,6 +55,51 @@ Confirmed facts:
 - Prices are cents per litre as JSON numbers with one decimal. We store tenths of a cent as
   integers, so 205.6 becomes 2056.
 
+## What llms.txt tells us
+
+`https://petrolmate.com.au/llms.txt` is unusually informative and worth re-reading before any
+source work.
+
+Petrolmate is an aggregator over **seven named government APIs**: NSW FuelCheck, QLD Fuel API, SA
+Informed Sources, VIC Fair Fuel (the real-time `/public/v1/` endpoint, not the 24-hour-delayed open
+data feed), WA FuelWatch, NT MyFuel and TAS FuelCheck. ACT and NZ are community-verified because
+those regulators publish nothing. So for anything Petrolmate cannot legitimately give us, the
+upstream regulator is the place to go, and pump prices there are mostly CC-BY or equivalent.
+
+Sync cadence is stated: twice daily at 6am and 12pm AEST, plus VIC and NSW boost syncs every 30
+minutes between 06:00 and 10:00. Our 07:00-13:00 local sampling window sits after the morning sync
+in every state, which is what we want. A Melbourne page fetched at 07:00 AEST reported "last
+updated 06:04 AM", consistent with that.
+
+Licensing is explicit and matters to us: *"Citation with a link is welcome and encouraged. Bulk
+reproduction or redistribution requires written permission: admin@petrolmate.com.au."* Publishing a
+rolling 60-day series to GitHub Pages is closer to redistribution than to citation. The underlying
+pump prices are open regulator data, and our cycle params are our own derived analysis, but the
+daily average series itself is the grey area. There is a contact address for exactly this.
+
+Their own cycle engine is described as FFT-based over a 35-day window with a price-percentile
+signal, a forecast-direction signal and confidence tiers. That is independent confirmation that the
+approach in `cyclefit.js` is the right shape, and that confidence tiering is necessary rather than
+optional.
+
+## Metro data: what the allowed pages actually yield
+
+`robots.txt` allows `/city/`, `/state/` and `/fuel/`, so these are fair game without touching the
+API. Probing `https://petrolmate.com.au/city/vic/melbourne` (342KB) found:
+
+- **Metro average, but only for ULP**, and only in prose: `The current average price is
+  <strong>204.0c/L</strong>`. Melbourne 204.0c across 1,171 stations against VIC state-wide 205.6c
+  across 1,929, so the metro figure is genuinely different and genuinely useful.
+- **Cheapest price per fuel**, not averages: "ULP from 185.2c/L, Diesel from 219.9c/L".
+- **Five JSON-LD blocks**: LocalBusiness, WebPage, BreadcrumbList, ItemList, FAQPage. The ItemList
+  is the station ranking and carries `name`, `addressLocality` and `brand` for ten stations —
+  **but no prices**.
+
+So the allowed pages give metro averages per fuel only via `/fuel/{fuel}/city/{capital}`, which is
+5 capitals x 6 fuels = 30 page loads of ~340KB per run, about 10MB, parsed out of prose that a
+copy tweak would break. And they give **no station-level prices at all**, which is what the
+favourite-stations feature needs.
+
 ## State-level only, no metro
 
 `/api/summary` is state-wide. Getting capital-city averages would need `/api/widget/prices` with a

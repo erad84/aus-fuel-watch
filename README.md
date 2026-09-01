@@ -28,8 +28,12 @@ zip container by hand and inflates with Node's built-in `zlib`.
 
 ## How the data pipeline works
 
-`data/collect.js` runs on a schedule, makes **one** HTTP request to Petrolmate's `/api/summary`,
-and appends one reading per state and fuel to a rolling 60-day window in `docs/v1/{STATE}.json`.
+`data/collect.js` runs on a schedule, fetches **station-level prices** from official
+government adapters where available, aggregates them to capital-metro and state-wide
+averages, and falls back to Petrolmate `/api/summary` only for Victoria until Servo
+Saver credentials exist. South Australia uses SAFPIS (`SA_FUEL_TOKEN`); Queensland
+uses Fuel Prices QLD (`QLD_FUEL_TOKEN`); NSW, ACT and Tasmania use NSW FuelCheck; WA
+uses FuelWatch RSS; NT uses MyFuel NT.
 Days that roll out of the window are written to `docs/v1/archive/YYYY-MM.json` first.
 
 Writes only ever fill an empty slot, so re-running is safe and a retry can never overwrite a good
@@ -84,10 +88,10 @@ data exist.
 
 ## Data sources and attribution
 
-**Live and historical prices: [Petrolmate](https://petrolmate.com.au).** Petrolmate aggregates
-official state government feeds and community reports. The collector uses only `/api/summary`,
-which `robots.txt` explicitly allows via `Allow: /api/summary` ahead of its `Disallow: /api/`, and
-sends an identifying User-Agent. One request per run.
+**Live and historical prices** come from official government feeds where available
+(NSW FuelCheck, SAFPIS, Fuel Prices Queensland, WA FuelWatch, NT MyFuel), with Petrolmate
+`/api/summary` as a state-wide fallback for VIC until its open-data key is in place.
+Attribution for each source appears in the published data files and in app settings.
 
 **Cycle seeding: [FuelRadar](https://fuelradar.com.au).** A manually downloaded workbook of
 state-wide daily averages was used once, locally, to fit the cycle parameters in
@@ -97,6 +101,20 @@ parameters are, which are aggregate statistics rather than a reproduction of the
 
 Attribution for both appears in the app's settings page.
 
+## Credentials
+
+Some jurisdictions need an API key. They are read from the environment, never from a file in
+the repository. Copy `.env.example` to `.env` and fill in what you have; `.env` is gitignored.
+
+| Variable | Covers | Register at |
+| --- | --- | --- |
+| `FUELCHECK_API_KEY` / `FUELCHECK_API_SECRET` | NSW, ACT, TAS | [api.nsw.gov.au](https://api.nsw.gov.au/Product/Index/22), free, 2500 calls/month |
+
+Western Australia's FuelWatch feed needs no credentials. The collector fails with an explicit
+message when a required credential is missing, rather than quietly publishing an empty day.
+
+Node 22 loads the file natively, so the pipeline stays dependency-free — there is no `dotenv`.
+
 ## Running it locally
 
 ```bash
@@ -104,10 +122,13 @@ Attribution for both appears in the app's settings page.
 node data/seed/fit-params.js "path/to/Fuel seed data.xlsx"
 
 # Collect today's prices
-node data/collect.js --catchup
+node --env-file=.env data/collect.js --catchup
 
 # See what a run would change without writing
-node data/collect.js --dry-run
+node --env-file=.env data/collect.js --dry-run
+
+# Check one source's coverage and aggregates against the live API
+node --env-file=.env data/seed/verify-source.js fuelcheck
 
 # Diagnostics
 node data/seed/inspect.js "VIC U91"
@@ -123,7 +144,10 @@ node data/seed/offset-check.js
    ```
 3. Settings → Pages → deploy from branch `data`, folder `/`.
 4. Settings → Actions → allow workflows to write to the repository.
-5. Run the `collect` workflow manually once to confirm it commits.
+5. Settings → Secrets and variables → Actions → add `FUELCHECK_API_KEY` and
+   `FUELCHECK_API_SECRET` as repository secrets, using the values from your own
+   [api.nsw.gov.au](https://api.nsw.gov.au/Product/Index/22) registration.
+6. Run the `collect` workflow manually once to confirm it commits.
 
 Scheduled workflows are disabled after 60 days without repository activity, which is why
 `heartbeat.yml` pushes a trivial commit monthly.

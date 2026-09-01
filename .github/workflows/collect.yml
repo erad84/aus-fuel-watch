@@ -1,17 +1,16 @@
 name: collect
 
-# Accumulates the state-wide price history. Nothing here can be backfilled: a
-# day missed is a day lost, which is why there are three attempts per day and
-# why writes only ever fill an empty slot.
+# Accumulates fuel price history from official government feeds. A missed day
+# cannot be backfilled, so there are three scheduled attempts per day and writes
+# only ever fill an empty slot.
 
 on:
   schedule:
-    # 23:07 UTC puts every state between 07:07 and 10:07 local, which is inside
-    # the collector's sampling window year round including DST.
+    # 23:07 UTC → ~07:07–10:07 local in every state (inside the sampling window).
     - cron: '7 23 * * *'
-    # Mid-morning retry, still inside the window for all states.
+    # Mid-morning retry, still inside the window for eastern states.
     - cron: '37 2 * * *'
-    # Catch-up: fills any slot still empty, ignoring the local-hour window.
+    # Catch-up: fill any still-empty slot regardless of local hour.
     - cron: '7 6 * * *'
   workflow_dispatch:
     inputs:
@@ -20,7 +19,6 @@ on:
         type: boolean
         default: true
 
-# Two runs writing the same branch would race on push.
 concurrency:
   group: collect
   cancel-in-progress: false
@@ -32,25 +30,40 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
+      - name: Check out main
         uses: actions/checkout@v4
 
-      # The published data lives on its own branch so that a year of daily
-      # commits does not bury the watchapp's history on main. Checking it out at
-      # ./docs matches where collect.js writes locally.
-      - name: Check out published data branch
+      # Published JSON lives on the `data` branch (served by GitHub Pages). It is
+      # checked out into ./docs as a nested clone so commits push only history
+      # files without touching main.
+      - name: Check out data branch
+        continue-on-error: true
+        id: checkout_data
         uses: actions/checkout@v4
         with:
           ref: data
           path: docs
 
+      - name: Bootstrap data branch workspace
+        if: steps.checkout_data.outcome != 'success'
+        run: |
+          mkdir -p docs/v1
+          cd docs
+          git init -b data
+          git config user.name 'aus-fuel-watch-bot'
+          git config user.email 'actions@users.noreply.github.com'
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # No dependency install step: the pipeline is deliberately dependency-free.
 
       - name: Collect
+        env:
+          FUELCHECK_API_KEY: ${{ secrets.FUELCHECK_API_KEY }}
+          FUELCHECK_API_SECRET: ${{ secrets.FUELCHECK_API_SECRET }}
+          SA_FUEL_TOKEN: ${{ secrets.SA_FUEL_TOKEN }}
+          QLD_FUEL_TOKEN: ${{ secrets.QLD_FUEL_TOKEN }}
         run: |
           if [ "${{ github.event.schedule }}" = "7 6 * * *" ] || [ "${{ inputs.catchup }}" = "true" ]; then
             node data/collect.js --catchup
@@ -58,20 +71,24 @@ jobs:
             node data/collect.js
           fi
 
-      - name: Commit if changed
+      - name: Commit and push data branch
         working-directory: docs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name  'aus-fuel-watch-bot'
+          git config user.name 'aus-fuel-watch-bot'
           git config user.email 'actions@users.noreply.github.com'
+          if ! git remote get-url origin 2>/dev/null; then
+            git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
           if [ -z "$(git status --porcelain)" ]; then
             echo 'no change'
             exit 0
           fi
           git add -A
           git commit -m "data: $(date -u +%Y-%m-%d) collection"
-          # A concurrent run may have pushed since checkout.
           for attempt in 1 2 3; do
-            if git push; then exit 0; fi
-            git pull --rebase --autostash origin data || exit 1
+            if git push -u origin HEAD:data; then exit 0; fi
+            git pull --rebase origin data || exit 1
           done
           exit 1

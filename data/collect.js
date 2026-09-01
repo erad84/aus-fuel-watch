@@ -1,59 +1,49 @@
 'use strict';
 
-// Daily entry point for the scheduled job. One HTTP request covers the country.
+// Daily entry point for the scheduled job.
 //
-// Writes are idempotent and only ever fill an empty slot, so re-running is safe
-// and a retry can never overwrite a good reading with a worse one.
+// Fetches station-level prices from official adapters, aggregates to state and
+// capital-metro averages, and falls back to Petrolmate /api/summary only for
+// jurisdictions without a station source yet (VIC, QLD).
+//
+// Writes are idempotent and only ever fill an empty slot.
 //
 // Usage:
-//   node data/collect.js              record states inside their local morning window
-//   node data/collect.js --catchup    fill any still-empty slot regardless of local hour
-//   node data/collect.js --dry-run    report what would change, write nothing
+//   node --env-file=.env data/collect.js
+//   node --env-file=.env data/collect.js --catchup
+//   node --env-file=.env data/collect.js --dry-run
 
 const fs = require('fs');
 const path = require('path');
 const sources = require('./lib/sources');
+const aggregate = require('./lib/aggregate');
 const history = require('./lib/history');
 const cyclefit = require('./lib/cyclefit');
 const { FUELS, PARAM_FALLBACK } = require('./lib/fuels');
 const { STATES, localParts } = require('./lib/states');
 
-// In CI the published data branch is checked out at ./docs, so this resolves to
-// the same place it does locally.
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, '..', 'docs');
 const SEED_PARAMS = path.join(__dirname, 'params.seed.json');
 
-// Record a state when its own clock says mid-morning. Prices for the day are
-// published by then in every jurisdiction, and sampling at a consistent local
-// hour stops the series from drifting between "yesterday's" and "today's" price.
 const WINDOW_START_HOUR = 7;
 const WINDOW_END_HOUR = 13;
 
-// A state-wide mean built from fewer stations than this is not a state-wide
-// mean. Catches Petrolmate's currently-degraded TAS feed, which reports 18
-// stations against a real population of roughly 220.
 const MIN_STATIONS = 25;
-
-// Coverage may not fall below this share of what the feed has recently managed.
+const MIN_STATIONS_SAMPLED = 10;
 const MIN_COVERAGE_RATIO = 0.6;
-
-// Widest believable one-day move, in tenths of a cent. Real hikes run 20-40c,
-// so 45c leaves genuine spikes intact while rejecting feed glitches.
 const MAX_DAILY_MOVE = 450;
-
 const MIN_PLAUSIBLE = 500;
 const MAX_PLAUSIBLE = 4000;
-
-// Once our own series is this long, cycle params are refitted from it and the
-// seeded values are retired for that state and fuel.
 const REANCHOR_MIN_DAYS = 45;
 
 function fmt(tenths) {
   return tenths === null || tenths === undefined ? '-' : (tenths / 10).toFixed(1);
 }
 
-// Returns null when the reading is acceptable, otherwise the reason to reject.
-function checkReading(file, fuel, iso, reading, premiumInverted) {
+function checkReading(file, fuel, iso, reading, premiumInverted, opts) {
+  const sampled = opts && opts.sampled;
+  const minN = sampled ? MIN_STATIONS_SAMPLED : MIN_STATIONS;
+
   if (reading.avg === null) return 'avg missing or non-numeric';
   if (reading.avg < MIN_PLAUSIBLE || reading.avg > MAX_PLAUSIBLE) {
     return `avg ${fmt(reading.avg)}c outside plausible range`;
@@ -61,7 +51,7 @@ function checkReading(file, fuel, iso, reading, premiumInverted) {
   if (premiumInverted && (fuel === 'P95' || fuel === 'P98')) {
     return 'premium grades inverted (P95 above P98)';
   }
-  if (reading.n !== null && reading.n < MIN_STATIONS) {
+  if (reading.n !== null && reading.n < minN) {
     return `only ${reading.n} stations`;
   }
 
@@ -90,9 +80,6 @@ function seriesFromFile(file, fuel) {
   return out;
 }
 
-// Prefer params fitted from our own collected series once it is long enough.
-// Until then use the seeded ones, and fall back across fuels where the seed had
-// no series at all (the workbook has no premium diesel).
 function resolveParams(file, seedForState) {
   const out = {};
   for (const fuel of FUELS) {
@@ -131,19 +118,95 @@ function resolveParams(file, seedForState) {
   return out;
 }
 
+function statsToReading(s) {
+  if (!s) return null;
+  return { avg: s.avg, min: s.min, max: s.max, n: s.n };
+}
+
+async function fetchAllStations() {
+  const stations = [];
+  const attributions = [];
+  const notes = [];
+  const sampledStates = new Set();
+
+  for (const adapter of sources.stationSources()) {
+    try {
+      const snap = await adapter.fetchStations();
+      stations.push(...snap.stations);
+      if (snap.attribution) attributions.push(snap.attribution);
+      for (const st of snap.sampled || []) sampledStates.add(st);
+      for (const n of snap.notes || []) notes.push(`${adapter.NAME}: ${n}`);
+    } catch (err) {
+      notes.push(`${adapter.NAME}: FAILED (${err.message})`);
+    }
+  }
+
+  return { stations, attributions, notes, sampledStates };
+}
+
+function readingsFromAggregate(scopes, preferMetro) {
+  const readings = {};
+  for (const fuel of FUELS) {
+    const s =
+      preferMetro && scopes.metro[fuel]
+        ? scopes.metro[fuel]
+        : scopes.state[fuel] || scopes.metro[fuel];
+    const r = statsToReading(s);
+    if (r) readings[fuel] = r;
+  }
+  return readings;
+}
+
+function readingsFromPetrolmate(state, snap) {
+  const byFuel = snap.states[state];
+  if (!byFuel) return {};
+  const readings = {};
+  for (const fuel of FUELS) {
+    const v = byFuel[fuel];
+    if (!v) continue;
+    readings[fuel] = {
+      avg: v.avg,
+      min: v.min,
+      max: v.max,
+      n: v.n,
+    };
+  }
+  return readings;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const catchup = args.includes('--catchup');
   const dryRun = args.includes('--dry-run');
 
-  const source = sources.get(process.env.FUEL_SOURCE);
   const seed = fs.existsSync(SEED_PARAMS)
     ? JSON.parse(fs.readFileSync(SEED_PARAMS, 'utf8'))
     : { states: {} };
 
-  console.log(`fetching ${source.URL}`);
-  const snap = await source.fetchSnapshot();
-  console.log(`source generated ${snap.generatedAt}, states: ${Object.keys(snap.states).join(' ')}`);
+  const { stations, attributions, notes: srcNotes, sampledStates } = await fetchAllStations();
+  console.log(`station rows: ${stations.length}`);
+  for (const n of srcNotes) console.log(`  ${n}`);
+
+  const agg = aggregate.aggregate(stations);
+  const stationStates = new Set(Object.keys(agg));
+
+  let petrolmateSnap = null;
+  const needsFallback = STATES.some((st) => !stationStates.has(st));
+  if (needsFallback) {
+    try {
+      petrolmateSnap = await sources.get('petrolmate').fetchSnapshot();
+      console.log(
+        `petrolmate fallback: generated ${petrolmateSnap.generatedAt}, states ${Object.keys(
+          petrolmateSnap.states
+        ).join(' ')}`
+      );
+    } catch (err) {
+      console.log(`petrolmate fallback failed: ${err.message}`);
+    }
+  }
+
+  const attributionParts = [...attributions];
+  if (petrolmateSnap && petrolmateSnap.attribution) attributionParts.push(petrolmateSnap.attribution);
 
   const now = new Date();
   let changedFiles = 0;
@@ -152,9 +215,16 @@ async function main() {
   let skipped = 0;
 
   for (const state of STATES) {
-    const readings = snap.states[state];
-    if (!readings) {
-      console.log(`${state}: absent from snapshot`);
+    const scopes = agg[state];
+    const fromStations = Boolean(scopes);
+    const readings = fromStations
+      ? readingsFromAggregate(scopes, true)
+      : petrolmateSnap
+      ? readingsFromPetrolmate(state, petrolmateSnap)
+      : {};
+
+    if (!Object.keys(readings).length) {
+      console.log(`${state}: no readings`);
       continue;
     }
 
@@ -164,8 +234,6 @@ async function main() {
 
     history.roll(DOCS_DIR, file, day);
 
-    // Evaluated once per state because it is a statement about the sample as a
-    // whole, not about one grade.
     const premiumInverted =
       readings.P95 &&
       readings.P98 &&
@@ -173,7 +241,9 @@ async function main() {
       readings.P98.avg !== null &&
       readings.P95.avg > readings.P98.avg;
 
+    const checkOpts = { sampled: sampledStates.has(state) };
     const notes = [];
+
     for (const fuel of FUELS) {
       const reading = readings[fuel];
       if (!reading) continue;
@@ -187,10 +257,8 @@ async function main() {
         continue;
       }
 
-      const reason = checkReading(file, fuel, day, reading, premiumInverted);
+      const reason = checkReading(file, fuel, day, reading, premiumInverted, checkOpts);
       if (reason) {
-        // Counted once per local day, not once per attempt, so three runs a day
-        // do not treble the tally and a retry does not rewrite the file.
         const rec = file.rejects[fuel] || { count: 0, last: null };
         if (!rec.last || rec.last.date !== day) {
           rec.count++;
@@ -211,27 +279,24 @@ async function main() {
 
     file.params = resolveParams(file, seed.states[state]);
     file.generated = new Date().toISOString();
-    file.sourceGeneratedAt = snap.generatedAt;
-    file.attribution = snap.attribution;
+    file.granularity = fromStations ? 'metro' : 'state';
+    file.sourceGeneratedAt = petrolmateSnap ? petrolmateSnap.generatedAt : file.generated;
+    file.attribution = attributionParts.join('; ');
 
     console.log(
       `${state}: local ${day} ${String(hour).padStart(2, '0')}h ${
         inWindow ? 'in-window' : catchup ? 'catch-up' : 'out-of-window'
-      }, ${file.days} day(s) held`
+      }, ${file.granularity} series, ${file.days} day(s) held`
     );
     for (const n of notes) console.log(n);
 
-    if (!dryRun) {
-      if (history.save(DOCS_DIR, file)) changedFiles++;
-    }
+    if (!dryRun && history.save(DOCS_DIR, file)) changedFiles++;
   }
 
   if (!dryRun) {
-    // Deliberately carries no timestamp: this is static metadata, and stamping
-    // it would force a commit on every run. Freshness lives in the state files.
     const index = {
       v: history.SCHEMA,
-      source: snap.attribution,
+      source: attributionParts.join('; '),
       windowDays: history.WINDOW_DAYS,
       units: 'tenths of a cent per litre',
       fuels: FUELS,
