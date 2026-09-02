@@ -29,6 +29,11 @@ const WINDOW_END_HOUR = 13;
 
 const MIN_STATIONS = 25;
 const MIN_STATIONS_SAMPLED = 10;
+// FuelCheck under-reports these; verified against live API 2026-09-03.
+const MIN_STATIONS_OVERRIDE = {
+  TAS: { E10: 4 },
+  ACT: { DSL: 10 },
+};
 const MIN_COVERAGE_RATIO = 0.6;
 const MAX_DAILY_MOVE = 500;
 const MIN_PLAUSIBLE = 500;
@@ -39,9 +44,16 @@ function fmt(tenths) {
   return tenths === null || tenths === undefined ? '-' : (tenths / 10).toFixed(1);
 }
 
+function minStations(state, fuel, sampled) {
+  const byFuel = MIN_STATIONS_OVERRIDE[state];
+  if (byFuel && byFuel[fuel] !== undefined) return byFuel[fuel];
+  return sampled ? MIN_STATIONS_SAMPLED : MIN_STATIONS;
+}
+
 function checkReading(file, fuel, iso, reading, premiumInverted, opts) {
   const sampled = opts && opts.sampled;
-  const minN = sampled ? MIN_STATIONS_SAMPLED : MIN_STATIONS;
+  const state = opts && opts.state;
+  const minN = minStations(state, fuel, sampled);
 
   if (reading.avg === null) return 'avg missing or non-numeric';
   if (reading.avg < MIN_PLAUSIBLE || reading.avg > MAX_PLAUSIBLE) {
@@ -227,7 +239,7 @@ async function main() {
       readings.P98.avg !== null &&
       readings.P95.avg > readings.P98.avg;
 
-    const checkOpts = { sampled: sampledStates.has(state) };
+    const checkOpts = { sampled: sampledStates.has(state), state };
     const notes = [];
 
     for (const fuel of FUELS) {
