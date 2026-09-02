@@ -31,7 +31,7 @@ const MIN_STATIONS = 25;
 const MIN_STATIONS_SAMPLED = 10;
 // FuelCheck under-reports these; verified against live API 2026-09-03.
 const MIN_STATIONS_OVERRIDE = {
-  TAS: { E10: 4 },
+  TAS: { E10: 2 },
   ACT: { DSL: 10 },
 };
 const MIN_COVERAGE_RATIO = 0.6;
