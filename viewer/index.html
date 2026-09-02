@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aus Fuel Watch — Data Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Aus Fuel Watch</h1>
+    <p class="subtitle">Collected price history + live station map</p>
+  </header>
+
+  <section class="panel controls">
+    <label>
+      Data base URL
+      <input id="dataBase" type="url" value="https://erad84.github.io/aus-fuel-watch" />
+    </label>
+    <button id="btnLoad" type="button">Load data</button>
+    <label>
+      State
+      <select id="stateSelect"></select>
+    </label>
+    <label>
+      Fuel
+      <select id="fuelSelect">
+        <option value="U91">U91 Unleaded</option>
+        <option value="E10">E10</option>
+        <option value="P95">P95</option>
+        <option value="P98">P98</option>
+        <option value="DSL">Diesel</option>
+        <option value="PDSL">Premium diesel</option>
+      </select>
+    </label>
+    <label class="checkbox">
+      <input id="overlaySummary" type="checkbox" />
+      Overlay state-wide snapshot (Petrolmate live)
+    </label>
+    <label>
+      Station proxy
+      <input id="stationProxy" type="url" placeholder="auto via serve.mjs" />
+    </label>
+  </section>
+
+  <section class="panel" id="statusBar">Ready — set data URL and click Load data.</section>
+
+  <section class="grid-2">
+    <div class="panel">
+      <h2>Price history</h2>
+      <p class="hint" id="seriesHint"></p>
+      <div class="chart-wrap"><canvas id="historyChart"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Summary</h2>
+      <div id="summaryCards" class="cards"></div>
+      <div id="cycleStages" class="cycle-stages"></div>
+      <div id="e10Compare" class="e10-box hidden"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Stations (live)</h2>
+    <p class="hint">
+      Zoom in (level 11+) to load stations automatically (max 50 per view, 25&nbsp;km radius).
+      Blue pins = loading · green = prices loaded. Click a pin to load 25&nbsp;km around that station.
+    </p>
+    <div class="map-controls">
+      <label>
+        Near
+        <select id="capitalSelect"></select>
+      </label>
+      <button id="btnLoadStations" type="button">Go to capital</button>
+    </div>
+    <div class="map-container">
+      <div id="map"></div>
+      <div id="mapZoomHint">Zoom in closer to load station pins</div>
+    </div>
+    <div class="grid-2 station-grid">
+      <div>
+        <h3>Stations</h3>
+        <div id="stationList" class="station-list"></div>
+      </div>
+      <div>
+        <h3>Selected station</h3>
+        <div id="stationDetail" class="station-detail">Select a station on the map or list.</div>
+        <div class="chart-wrap small"><canvas id="stationChart"></canvas></div>
+        <p class="hint" id="stationChartHint"></p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+  Run <code>node viewer/serve.mjs</code> then open <code>http://localhost:3456</code>
+  (includes Petrolmate proxy — required for stations). Local JSON:
+  <code>http://localhost:3456/docs/v1/</code>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="brands.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

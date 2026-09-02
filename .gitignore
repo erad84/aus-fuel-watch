@@ -1,10 +1,9 @@
-# The seed workbook is a manual FuelRadar export. Only the derived cycle params
-# in data/params.seed.json are committed; the underlying series is never
-# redistributed.
+# FuelRadar seed workbook (optional local fit only; never published).
 *.xlsx
 *.xls
 *.csv
 data/seed/raw/
+data/params.seed.local.json
 
 # API credentials. Loaded locally with `node --env-file=.env`, and supplied in
 # CI as repository secrets. Never commit these; .env.example carries the

@@ -19,11 +19,10 @@ const sources = require('./lib/sources');
 const aggregate = require('./lib/aggregate');
 const history = require('./lib/history');
 const cyclefit = require('./lib/cyclefit');
-const { FUELS, PARAM_FALLBACK } = require('./lib/fuels');
+const { FUELS } = require('./lib/fuels');
 const { STATES, localParts } = require('./lib/states');
 
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, '..', 'docs');
-const SEED_PARAMS = path.join(__dirname, 'params.seed.json');
 
 const WINDOW_START_HOUR = 7;
 const WINDOW_END_HOUR = 13;
@@ -31,9 +30,9 @@ const WINDOW_END_HOUR = 13;
 const MIN_STATIONS = 25;
 const MIN_STATIONS_SAMPLED = 10;
 const MIN_COVERAGE_RATIO = 0.6;
-const MAX_DAILY_MOVE = 450;
+const MAX_DAILY_MOVE = 500;
 const MIN_PLAUSIBLE = 500;
-const MAX_PLAUSIBLE = 4000;
+const MAX_PLAUSIBLE = 5000;
 const REANCHOR_MIN_DAYS = 45;
 
 function fmt(tenths) {
@@ -80,7 +79,7 @@ function seriesFromFile(file, fuel) {
   return out;
 }
 
-function resolveParams(file, seedForState) {
+function resolveParams(file) {
   const out = {};
   for (const fuel of FUELS) {
     const own = seriesFromFile(file, fuel);
@@ -102,15 +101,6 @@ function resolveParams(file, seedForState) {
         observedDays: own.length,
         source: 'observed',
       };
-      continue;
-    }
-
-    const seeded = seedForState && (seedForState[fuel] || seedForState[PARAM_FALLBACK[fuel]]);
-    if (seeded) {
-      out[fuel] = { ...seeded, observedDays: own.length };
-      if (!seedForState[fuel] && PARAM_FALLBACK[fuel]) {
-        out[fuel].source = `seed:${PARAM_FALLBACK[fuel]}`;
-      }
     } else {
       out[fuel] = { confidence: 'none', hasCycle: false, observedDays: own.length, source: 'none' };
     }
@@ -178,10 +168,6 @@ async function main() {
   const args = process.argv.slice(2);
   const catchup = args.includes('--catchup');
   const dryRun = args.includes('--dry-run');
-
-  const seed = fs.existsSync(SEED_PARAMS)
-    ? JSON.parse(fs.readFileSync(SEED_PARAMS, 'utf8'))
-    : { states: {} };
 
   const { stations, attributions, notes: srcNotes, sampledStates } = await fetchAllStations();
   console.log(`station rows: ${stations.length}`);
@@ -277,7 +263,7 @@ async function main() {
       wrote++;
     }
 
-    file.params = resolveParams(file, seed.states[state]);
+    file.params = resolveParams(file);
     file.generated = new Date().toISOString();
     file.granularity = fromStations ? 'metro' : 'state';
     file.sourceGeneratedAt = petrolmateSnap ? petrolmateSnap.generatedAt : file.generated;

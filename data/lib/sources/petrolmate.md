@@ -155,3 +155,18 @@ A reading is rejected, and the day left empty for the catch-up run, when any of 
 
 Rejections are counted per state in the published file so the watch can downgrade confidence rather
 than silently showing a wrong verdict.
+
+## Future: watchapp settings (phone)
+
+Deferred — not part of the scheduled collector.
+
+The Home Assistant endpoint `GET /api/v1/stations/area` (`lat`, `lng`, `radius`, `limit` ≤ 50) is a
+good fit for **user-initiated** favourite-station picking on the phone settings page (Clay): show
+nearby stations with live prices, let the user save a short list for the watch dashboard. That
+matches Petrolmate's fair-use intent (periodic location lookups) rather than bulk extraction.
+
+Keep the scheduled job on `/api/summary` (allowed) and gov adapters for history. Use the area API
+only from pkjs when the user opens settings or refreshes favourites — not from GitHub Actions.
+Robots.txt disallows `/api/` except summary for automated agents; interactive phone traffic is a
+different class of use. Confirm with Petrolmate if we embed their map UI or ship a high-volume
+favourite refresh loop.

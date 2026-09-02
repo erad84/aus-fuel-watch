@@ -117,7 +117,7 @@ function main() {
     states: params,
   };
 
-  const dest = path.join(__dirname, '..', 'params.seed.json');
+  const dest = path.join(__dirname, '..', 'params.seed.local.json');
   fs.writeFileSync(dest, JSON.stringify(out, null, 2) + '\n');
 
   console.log(

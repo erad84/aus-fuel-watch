@@ -13,13 +13,11 @@ data/                     price history pipeline (plain Node, zero dependencies)
   lib/cyclefit.js         cycle detection and parameter fitting
   lib/history.js          rolling window, monthly archive, published file format
   lib/sources/            source adapters + API probe notes
-  seed/fit-params.js      one-time local fit from the seed workbook
-  seed/offset-check.js    compares seed levels against collected levels
-  seed/inspect.js         prints one series with daily deltas, for diagnosis
+  seed/bootstrap-published.js reset empty v1 files (live-only restart)
   collect.js              daily entry point for CI
-  params.seed.json        committed output of fit-params.js
 docs/                     published data (lives on the `data` branch, gitignored on main)
 src/                      watchapp: C UI and PebbleKit JS
+viewer/                   browser dashboard (charts, map, cycle stages)
 .github/workflows/        collect + heartbeat
 ```
 
@@ -47,8 +45,8 @@ does not bury the watchapp's history. GitHub Pages serves that branch.
 
 The feed is not trusted blindly. A reading is rejected, leaving the slot for a later run, when the
 average is implausible, when the state-wide mean is built from fewer than 25 stations, when station
-coverage collapses below 60% of its recent median, when the average jumps more than 45 c/L from its
-trailing median, or when premium 95 is reported above premium 98.
+coverage collapses below 60% of its recent median, when the average jumps more than 50 c/L from its
+trailing median, when avg falls outside 50–500 c/L, or when premium 95 is reported above premium 98.
 
 These gates are not hypothetical. Petrolmate's Tasmanian feed is currently degraded, reporting ULP
 at 277.2 c/L across 18 stations where the real figure is about 210 c/L across roughly 220 stations,
@@ -83,8 +81,17 @@ and the same applies to the data we collect ourselves.
 Which is why the watch leads with **position in the recent range plus current direction** ("near the
 bottom of the last few weeks and still falling") rather than cycle timing, and only quotes timing
 where confidence is earned. Every fitted series carries a `confidence` of `good`, `fair` or `none`,
-and the UI degrades with it. Seeded params are retired per state and fuel once 45 days of our own
-data exist.
+and the UI degrades with it. Cycle params are fitted from **our own collected series** once
+45 days of history exist per state and fuel; there is no seed fallback.
+
+### E10 vs U91 (energy-adjusted)
+
+E10 is about **3% less energy-dense** per litre than U91. The watch compares both when a station
+(or state average) lists them: E10 only wins if its price is more than ~3% below U91
+(`E10 < U91 × 0.97` in the same units). Otherwise U91 is the better buy for money, even when E10
+looks slightly cheaper on the board. Logic lives in `data/lib/e10Economics.js` and
+`src/pkjs/e10Economics.js`. At favourite stations (phone settings / area API later), the same rule
+applies per site.
 
 ## Data sources and attribution
 
@@ -92,14 +99,6 @@ data exist.
 (NSW FuelCheck, SAFPIS, Fuel Prices Queensland, WA FuelWatch, NT MyFuel), with Petrolmate
 `/api/summary` as a state-wide fallback for VIC until its open-data key is in place.
 Attribution for each source appears in the published data files and in app settings.
-
-**Cycle seeding: [FuelRadar](https://fuelradar.com.au).** A manually downloaded workbook of
-state-wide daily averages was used once, locally, to fit the cycle parameters in
-`data/params.seed.json`. FuelRadar's terms prohibit scraping and redistribution, so the workbook is
-gitignored and never committed, and the underlying series is never republished. Only the derived
-parameters are, which are aggregate statistics rather than a reproduction of the data.
-
-Attribution for both appears in the app's settings page.
 
 ## Credentials
 
@@ -118,8 +117,8 @@ Node 22 loads the file natively, so the pipeline stays dependency-free — there
 ## Running it locally
 
 ```bash
-# Fit cycle params from the seed workbook (one-off, needs the workbook)
-node data/seed/fit-params.js "path/to/Fuel seed data.xlsx"
+# Reset published files to empty (before a live-only restart)
+node data/seed/bootstrap-published.js
 
 # Collect today's prices
 node --env-file=.env data/collect.js --catchup
@@ -129,16 +128,12 @@ node --env-file=.env data/collect.js --dry-run
 
 # Check one source's coverage and aggregates against the live API
 node --env-file=.env data/seed/verify-source.js fuelcheck
-
-# Diagnostics
-node data/seed/inspect.js "VIC U91"
-node data/seed/offset-check.js
 ```
 
 ## One-time repository setup
 
-Everything is committed locally on `main`; published JSON is on branch `data` with
-today's first collection already seeded (`v1/*.json`).
+Everything is committed locally on `main`; published JSON lives on branch `data`
+(`docs/v1/*.json` on that branch).
 
 1. **Create an empty GitHub repository** (no README) e.g. `aus-fuel-watch`.
 

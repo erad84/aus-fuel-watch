@@ -218,6 +218,7 @@ function roll(docsDir, file, todayIso) {
 module.exports = {
   WINDOW_DAYS,
   SCHEMA,
+  emptyState,
   load,
   save,
   statePath,
