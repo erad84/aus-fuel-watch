@@ -3,6 +3,7 @@
 *.xls
 *.csv
 data/seed/raw/
+data/seed/.import-cache/
 data/params.seed.local.json
 
 # API credentials. Loaded locally with `node --env-file=.env`, and supplied in

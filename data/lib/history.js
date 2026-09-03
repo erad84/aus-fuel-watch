@@ -12,7 +12,7 @@ const path = require('path');
 const { FUELS } = require('./fuels');
 const { isoToDayNum, dayNumToISO, median } = require('./cyclefit');
 
-const WINDOW_DAYS = 60;
+const WINDOW_DAYS = 90;
 const SCHEMA = 1;
 
 function statePath(docsDir, state) {
@@ -73,7 +73,7 @@ function save(docsDir, file) {
     }
   }
 
-  // Not pretty-printed: at 60 days the series arrays hold ~1400 numbers, and one
+  // Not pretty-printed: at 90 days the series arrays hold ~2100 numbers, and one
   // per line would roughly double what the phone downloads. Commit diffs become
   // single-line, which is an acceptable trade on a machine-read data branch.
   fs.writeFileSync(p, JSON.stringify(file) + '\n');

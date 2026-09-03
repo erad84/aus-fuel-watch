@@ -186,6 +186,20 @@ async function fetchStations(options) {
   };
 }
 
+/** Fetch one calendar day (`today`, `yesterday`) for all products. */
+async function fetchStationsForDay(dayLabel) {
+  const out = new Map();
+  const notes = [];
+  for (const p of PRODUCTS) {
+    const xml = await fetchProduct(p.code, dayLabel);
+    const n = parseInto(xml, p.fuel, out, 'prices');
+    notes.push(`${dayLabel} ${p.fuel}: ${n}`);
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  const stations = [...out.values()].filter((s) => Object.keys(s.prices).length > 0);
+  return { stations, notes };
+}
+
 module.exports = {
   NAME,
   ATTRIBUTION,
@@ -194,4 +208,5 @@ module.exports = {
   PRODUCTS,
   TOMORROW_PUBLISH_HOUR,
   fetchStations,
+  fetchStationsForDay,
 };
