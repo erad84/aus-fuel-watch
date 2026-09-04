@@ -1,0 +1,50 @@
+{
+ "v": 1,
+ "windowDays": 90,
+ "units": "tenths of a cent per litre",
+ "path": "stations/{STATE}/days/{YYYY-MM-DD}.json",
+ "catalog": "stations/{STATE}/catalog.json",
+ "archive": "stations/archive/{YYYY-MM}.json",
+ "states": [
+  {
+   "code": "NSW",
+   "catalog": "NSW/catalog.json",
+   "days": "NSW/days/"
+  },
+  {
+   "code": "VIC",
+   "catalog": "VIC/catalog.json",
+   "days": "VIC/days/"
+  },
+  {
+   "code": "QLD",
+   "catalog": "QLD/catalog.json",
+   "days": "QLD/days/"
+  },
+  {
+   "code": "SA",
+   "catalog": "SA/catalog.json",
+   "days": "SA/days/"
+  },
+  {
+   "code": "WA",
+   "catalog": "WA/catalog.json",
+   "days": "WA/days/"
+  },
+  {
+   "code": "TAS",
+   "catalog": "TAS/catalog.json",
+   "days": "TAS/days/"
+  },
+  {
+   "code": "NT",
+   "catalog": "NT/catalog.json",
+   "days": "NT/days/"
+  },
+  {
+   "code": "ACT",
+   "catalog": "ACT/catalog.json",
+   "days": "ACT/days/"
+  }
+ ]
+}

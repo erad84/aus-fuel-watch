@@ -1,6 +1,6 @@
 {
  "v": 1,
- "source": "NSW FuelCheck and FuelCheck TAS (NSW Government); FuelWatch WA (Department of Energy, Mines, Industry Regulation and Safety); MyFuel NT (NT Consumer Affairs); SA Fuel Pricing Information Scheme (SAFPIS); Fuel Prices Queensland (Queensland Government); Petrolmate (petrolmate.com.au)",
+ "source": "official open-data archives + collector",
  "windowDays": 90,
  "units": "tenths of a cent per litre",
  "fuels": [
@@ -44,5 +44,9 @@
    "code": "ACT",
    "file": "ACT.json"
   }
- ]
+ ],
+ "stations": {
+  "index": "stations/index.json",
+  "note": "Per-station daily prices (not downloaded by the watch)"
+ }
 }
