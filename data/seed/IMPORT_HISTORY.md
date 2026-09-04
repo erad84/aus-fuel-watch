@@ -16,19 +16,31 @@ Downloads cache to `data/seed/.import-cache/` (gitignored).
 
 | Flag | States | Archive | Metro? |
 | --- | --- | --- | --- |
-| `nsw` | NSW, ACT, TAS | [Data.NSW FuelCheck](https://data.nsw.gov.au/data/dataset/fuel-check) monthly CSV | state-wide (no coords in CSV) |
+| `nsw` | NSW, ACT, TAS | [Data.NSW FuelCheck](https://data.nsw.gov.au/data/dataset/fuel-check) monthly CSV/XLSX + local cache | state-wide (no coords) |
 | `qld` | QLD | [QLD open data](https://www.data.qld.gov.au/dataset/fuel-price-reporting-2026) monthly CSV | yes (lat/lng) |
 | `nt` | NT | [NTG MyFuel](https://data.nt.gov.au/dataset/?groups=driving) monthly XLSX | yes (region + coords) |
-| `wa` | WA | FuelWatch RSS (`today`, `yesterday`) + optional zip cache | yes (coords) |
+| `wa` | WA | FuelWatch RSS (`today`, `yesterday`) + optional zip/CSV cache | yes (coords / Metro region) |
+
+### NSW / ACT / TAS local backfill
+
+Drop monthly FuelCheck price-history files into:
+
+`data/seed/.import-cache/nsw/`
+
+Supported: **`.csv`** and **`.xlsx`**. Legacy **`.xls`** (Excel 97–2003) is not supported —
+open in Excel/LibreOffice and Save As `.xlsx` or `.csv` first.
+
+Expected columns (Data.NSW layout): `ServiceStationName`, `Address`, `Suburb`,
+`Postcode`, `Brand`, `FuelCode`, `PriceUpdatedDate`, `Price`.
 
 ### WA full backfill
 
-The RSS API does **not** expose arbitrary dates. For more than ~2 days, download monthly `FuelWatchRetail-*.csv` (or `.csv.zip`)
-files from the FuelWatch historic portal and place them in:
+The RSS API does **not** expose arbitrary dates. For more than ~2 days, download monthly
+`FuelWatchRetail-*.csv` (or `.csv.zip`) from the FuelWatch historic portal and place them in:
 
 `data/seed/.import-cache/wa/`
 
-Re-run the importer; it will parse any zip CSVs found there.
+Re-run the importer; it will parse any CSV/zip files found there.
 
 ## Window
 

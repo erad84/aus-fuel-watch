@@ -115,6 +115,9 @@ function ensureDay(file, iso) {
       s.n = new Array(shift).fill(null).concat(s.n);
     }
     file.start = iso;
+    // Arrays grew by `shift`; keep days in sync even if later slots are
+    // already filled and never re-written by the importer.
+    file.days = (file.days || 0) + shift;
     idx = 0;
   }
 

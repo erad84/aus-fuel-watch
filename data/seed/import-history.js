@@ -75,9 +75,19 @@ async function main() {
 
   if (args.sources.has('nsw')) {
     console.log('\nNSW/ACT/TAS (FuelCheck archives)…');
-    const byState = await nsw.importNswActTas(CACHE_DIR, args.days);
+    const { byState, localFiles, skippedXls } = await nsw.importNswActTas(CACHE_DIR, args.days);
+    if (localFiles) console.log(`  parsed ${localFiles} local file(s) from cache/nsw/`);
+    if (skippedXls && skippedXls.length) {
+      console.log(
+        `  skipped legacy .xls (convert to .xlsx or .csv): ${skippedXls.join(', ')}`
+      );
+    }
     if (!byState.size) {
-      console.log('  no monthly CSV files overlap the requested window (archives lag ~1 month)');
+      console.log(
+        '  no data in window — drop FuelCheck CSV/XLSX into',
+        path.join(CACHE_DIR, 'nsw'),
+        '(or wait for Data.NSW monthly publish)'
+      );
     }
     await applyImport('NSW archive', byState, nsw.ATTRIBUTION, 'state');
   }
