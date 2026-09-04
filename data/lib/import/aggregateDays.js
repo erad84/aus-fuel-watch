@@ -26,6 +26,7 @@ function readingsByStateAndDay(stationsByDay, opts) {
         if (!s) continue;
         readings[fuel] = {
           avg: s.avg,
+          med: s.med,
           min: s.min,
           max: s.max,
           n: s.n,

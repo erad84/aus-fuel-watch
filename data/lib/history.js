@@ -25,7 +25,7 @@ function archivePath(docsDir, month) {
 
 function emptyState(state) {
   const fuels = {};
-  for (const f of FUELS) fuels[f] = { avg: [], min: [], max: [], n: [] };
+  for (const f of FUELS) fuels[f] = { avg: [], med: [], min: [], max: [], n: [] };
   return {
     v: SCHEMA,
     state,
@@ -40,13 +40,19 @@ function emptyState(state) {
   };
 }
 
+function ensureMedSeries(s) {
+  if (!s.med) s.med = new Array(s.avg?.length || 0).fill(null);
+  else padTo(s.med, s.avg?.length || 0);
+}
+
 function load(docsDir, state) {
   const p = statePath(docsDir, state);
   if (!fs.existsSync(p)) return emptyState(state);
   const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
   // Tolerate a fuel being added to the canonical list after the file was created.
   for (const f of FUELS) {
-    if (!parsed.fuels[f]) parsed.fuels[f] = { avg: [], min: [], max: [], n: [] };
+    if (!parsed.fuels[f]) parsed.fuels[f] = { avg: [], med: [], min: [], max: [], n: [] };
+    else ensureMedSeries(parsed.fuels[f]);
   }
   return parsed;
 }
@@ -95,6 +101,7 @@ function ensureDay(file, iso) {
     file.start = iso;
     for (const f of FUELS) {
       file.fuels[f].avg = [null];
+      file.fuels[f].med = [null];
       file.fuels[f].min = [null];
       file.fuels[f].max = [null];
       file.fuels[f].n = [null];
@@ -109,7 +116,9 @@ function ensureDay(file, iso) {
     const shift = -idx;
     for (const f of FUELS) {
       const s = file.fuels[f];
+      ensureMedSeries(s);
       s.avg = new Array(shift).fill(null).concat(s.avg);
+      s.med = new Array(shift).fill(null).concat(s.med);
       s.min = new Array(shift).fill(null).concat(s.min);
       s.max = new Array(shift).fill(null).concat(s.max);
       s.n = new Array(shift).fill(null).concat(s.n);
@@ -123,10 +132,13 @@ function ensureDay(file, iso) {
 
   const need = idx + 1;
   for (const f of FUELS) {
-    padTo(file.fuels[f].avg, need);
-    padTo(file.fuels[f].min, need);
-    padTo(file.fuels[f].max, need);
-    padTo(file.fuels[f].n, need);
+    const s = file.fuels[f];
+    ensureMedSeries(s);
+    padTo(s.avg, need);
+    padTo(s.med, need);
+    padTo(s.min, need);
+    padTo(s.max, need);
+    padTo(s.n, need);
   }
   file.days = Math.max(file.days || 0, need);
   return idx;
@@ -137,7 +149,13 @@ function getDay(file, fuel, iso) {
   if (idx < 0 || idx >= file.days) return null;
   const s = file.fuels[fuel];
   if (!s || s.avg[idx] === null || s.avg[idx] === undefined) return null;
-  return { avg: s.avg[idx], min: s.min[idx], max: s.max[idx], n: s.n[idx] };
+  return {
+    avg: s.avg[idx],
+    med: s.med?.[idx] ?? null,
+    min: s.min[idx],
+    max: s.max[idx],
+    n: s.n[idx],
+  };
 }
 
 function isSlotEmpty(file, fuel, iso) {
@@ -148,6 +166,7 @@ function setDay(file, fuel, iso, reading) {
   const idx = ensureDay(file, iso);
   const s = file.fuels[fuel];
   s.avg[idx] = reading.avg;
+  s.med[idx] = reading.med != null ? reading.med : null;
   s.min[idx] = reading.min;
   s.max[idx] = reading.max;
   s.n[idx] = reading.n;
@@ -192,7 +211,13 @@ function roll(docsDir, file, todayIso) {
       const s = file.fuels[f];
       if (s.avg[i] === null || s.avg[i] === undefined) continue;
       archived[month][f] = archived[month][f] || {};
-      archived[month][f][iso] = { avg: s.avg[i], min: s.min[i], max: s.max[i], n: s.n[i] };
+      archived[month][f][iso] = {
+        avg: s.avg[i],
+        med: s.med?.[i] ?? null,
+        min: s.min[i],
+        max: s.max[i],
+        n: s.n[i],
+      };
     }
   }
 
@@ -209,7 +234,9 @@ function roll(docsDir, file, todayIso) {
 
   for (const f of FUELS) {
     const s = file.fuels[f];
+    ensureMedSeries(s);
     s.avg = s.avg.slice(drop);
+    s.med = s.med.slice(drop);
     s.min = s.min.slice(drop);
     s.max = s.max.slice(drop);
     s.n = s.n.slice(drop);

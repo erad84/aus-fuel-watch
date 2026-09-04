@@ -18,7 +18,17 @@ Downloads cache to `data/seed/.import-cache/` (gitignored).
 | --- | --- | --- | --- |
 | `nsw` | NSW, ACT, TAS | [Data.NSW FuelCheck](https://data.nsw.gov.au/data/dataset/fuel-check) monthly CSV/XLSX + local cache | state-wide (no coords) |
 | `qld` | QLD | [QLD open data](https://www.data.qld.gov.au/dataset/fuel-price-reporting-2026) monthly CSV | yes (lat/lng) |
-| `nt` | NT | [NTG MyFuel](https://data.nt.gov.au/dataset/?groups=driving) monthly XLSX | yes (region + coords) |
+| `nt` | NT | [NTG MyFuel](https://data.nt.gov.au/dataset/?groups=driving) monthly XLSX + [MyFuel Trends JSON](https://myfuelnt.nt.gov.au/Trends/GetTrends?fueltypeId=DL&period=Monthly&regionId=3) | yes (XLSX regions/coords; Trends = Greater Darwin avg) |
+
+**NT notes:**
+- CKAN monthly XLSX archives currently stop at **November 2024**, so they do not
+  cover the live 90-day window.
+- `--sources nt` therefore also calls MyFuel’s site Trends API
+  (`/Trends/GetTrendsJson`, `period=Monthly`) and fills empty slots with the
+  last **~28 daily averages** for Greater Darwin (Darwin + Palmerston +
+  Litchfield, unweighted mean of regional avgs). Trends rows are **avg-only**
+  (`min` / `max` / `n` / `med` stay null).
+- Remaining older days still only accumulate via daily `collect.js`.
 | `wa` | WA | FuelWatch RSS (`today`, `yesterday`) + optional zip/CSV cache | yes (coords / Metro region) |
 
 ### NSW / ACT / TAS local backfill

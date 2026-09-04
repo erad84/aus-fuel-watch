@@ -17,6 +17,7 @@ const { mergeStateDays, trimAllStates, countFilledDays } = require('../lib/impor
 const nsw = require('../lib/import/nswFuelcheckArchive');
 const qld = require('../lib/import/qldOpenData');
 const nt = require('../lib/import/ntMyfuelArchive');
+const ntTrends = require('../lib/import/ntMyfuelTrends');
 const wa = require('../lib/import/waFuelwatch');
 
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, '..', '..', 'docs');
@@ -99,12 +100,35 @@ async function main() {
   }
 
   if (args.sources.has('nt')) {
-    console.log('\nNT (MyFuel XLSX)…');
-    const byState = await nt.importNt(CACHE_DIR, args.days);
+    console.log('\nNT (MyFuel CKAN XLSX)…');
+    const { byState, meta } = await nt.importNt(CACHE_DIR, args.days);
     if (!byState.size) {
-      console.log('  no XLSX files overlapped the window (check data.nt.gov.au for recent months)');
+      console.log(
+        `  no rows in window ${meta.window.startIso}…${meta.window.endIso}` +
+          ` (${meta.packages} CKAN packages, ${meta.xlsxTried} XLSX tried)`
+      );
+      if (meta.latestTitle) {
+        console.log(
+          `  newest on data.nt.gov.au: "${meta.latestTitle}"` +
+            (meta.latestModified ? ` (modified ${meta.latestModified.slice(0, 10)})` : '')
+        );
+      }
+    } else {
+      console.log(`  filled ${meta.daysFilled} day(s) from archive`);
     }
     await applyImport('NT archive', byState, nt.ATTRIBUTION, 'metro');
+
+    console.log('\nNT (MyFuel Trends JSON, ~28-day metro avg)…');
+    const trends = await ntTrends.importNtTrends(args.days);
+    const tm = trends.meta;
+    console.log(
+      `  period=${tm.period} regions=${tm.regionsOk}/3 days=${tm.daysFilled} (${tm.note})`
+    );
+    for (const err of tm.regionErrors) console.log(`  region warn: ${err}`);
+    if (!trends.byState.size) {
+      console.log('  no Trends rows in window');
+    }
+    await applyImport('NT Trends', trends.byState, ntTrends.ATTRIBUTION, 'metro');
   }
 
   if (args.sources.has('wa')) {

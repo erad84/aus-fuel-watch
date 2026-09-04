@@ -91,24 +91,47 @@ async function importNt(cacheDir, days) {
   const packages = await searchPackages();
   const stationsByDay = new Map();
   const startYear = Number(startIso.slice(0, 4)) - 1;
+  let xlsxTried = 0;
+  let latestTitle = null;
+  let latestModified = null;
 
   for (const pkg of packages) {
     const title = pkg.title || '';
     const yearMatch = title.match(/\b(20\d{2})\b/);
     if (yearMatch && Number(yearMatch[1]) < startYear) continue;
 
+    if (
+      !latestModified ||
+      (pkg.metadata_modified && pkg.metadata_modified > latestModified)
+    ) {
+      latestModified = pkg.metadata_modified || latestModified;
+      latestTitle = title;
+    }
+
     const show = await fetchJson(`${CKAN}/api/3/action/package_show?id=${pkg.id}`);
     const resources = show.result && show.result.resources;
     if (!resources) continue;
     for (const r of resources) {
       if ((r.format || '').toUpperCase() !== 'XLSX') continue;
+      xlsxTried++;
       const fname = `nt-${pkg.id}-${r.id}.xlsx`;
       const file = await downloadCached(r.url, path.join(cacheDir, 'nt'), fname);
       ingestXlsx(file, startIso, endIso, stationsByDay);
     }
   }
 
-  return readingsByStateAndDay(stationsByDay, { preferMetro: true });
+  const byState = readingsByStateAndDay(stationsByDay, { preferMetro: true });
+  return {
+    byState,
+    meta: {
+      window: { startIso, endIso },
+      packages: packages.length,
+      xlsxTried,
+      latestTitle,
+      latestModified,
+      daysFilled: stationsByDay.size,
+    },
+  };
 }
 
 module.exports = { ATTRIBUTION, importNt, dayRange };

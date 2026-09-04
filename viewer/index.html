@@ -24,6 +24,13 @@
       <select id="stateSelect"></select>
     </label>
     <label>
+      Scope
+      <select id="scopeSelect">
+        <option value="metro">Metro</option>
+        <option value="state">Whole state</option>
+      </select>
+    </label>
+    <label>
       Fuel
       <select id="fuelSelect">
         <option value="U91">U91 Unleaded</option>
@@ -46,9 +53,27 @@
 
   <section class="panel" id="statusBar">Ready — set data URL and click Load data.</section>
 
-  <section class="grid-2">
-    <div class="panel">
-      <h2>Price history</h2>
+  <section class="grid-history">
+    <div class="panel panel-chart">
+      <div class="chart-toolbar">
+        <h2 id="chartTitle">Price history</h2>
+        <div class="chart-toolbar-controls">
+          <label>
+            Period
+            <select id="periodSelect">
+              <option value="30">30 days</option>
+              <option value="60">60 days</option>
+              <option value="90" selected>90 days</option>
+            </select>
+          </label>
+          <div class="line-toggles" role="group" aria-label="Visible series">
+            <label class="checkbox"><input id="showAvg" type="checkbox" checked /> Mean</label>
+            <label class="checkbox"><input id="showMed" type="checkbox" checked /> Median</label>
+            <label class="checkbox"><input id="showMin" type="checkbox" checked /> Daily low</label>
+            <label class="checkbox"><input id="showMax" type="checkbox" checked /> Daily high</label>
+          </div>
+        </div>
+      </div>
       <p class="hint" id="seriesHint"></p>
       <div class="chart-wrap"><canvas id="historyChart"></canvas></div>
     </div>
@@ -60,7 +85,7 @@
     </div>
   </section>
 
-  <section class="panel">
+  <section class="panel stations-panel">
     <h2>Stations (live)</h2>
     <p class="hint">
       Zoom in (level 11+) to load stations automatically (max 50 per view, 25&nbsp;km radius).
@@ -73,20 +98,27 @@
       </label>
       <button id="btnLoadStations" type="button">Go to capital</button>
     </div>
-    <div class="map-container">
-      <div id="map"></div>
-      <div id="mapZoomHint">Zoom in closer to load station pins</div>
-    </div>
-    <div class="grid-2 station-grid">
-      <div>
+    <div class="map-layout">
+      <div class="map-col">
+        <div class="map-container">
+          <div id="map"></div>
+          <div id="mapZoomHint">Zoom in closer to load station pins</div>
+        </div>
+      </div>
+      <div class="stations-side">
         <h3>Stations</h3>
         <div id="stationList" class="station-list"></div>
       </div>
-      <div>
+    </div>
+    <div class="selected-layout">
+      <div class="selected-chart-col">
         <h3>Selected station</h3>
-        <div id="stationDetail" class="station-detail">Select a station on the map or list.</div>
         <div class="chart-wrap small"><canvas id="stationChart"></canvas></div>
         <p class="hint" id="stationChartHint"></p>
+      </div>
+      <div class="selected-detail-col">
+        <h3>Details</h3>
+        <div id="stationDetail" class="station-detail">Select a station on the map or list.</div>
       </div>
     </div>
   </section>

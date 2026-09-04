@@ -122,7 +122,7 @@ function resolveParams(file) {
 
 function statsToReading(s) {
   if (!s) return null;
-  return { avg: s.avg, min: s.min, max: s.max, n: s.n };
+  return { avg: s.avg, med: s.med, min: s.min, max: s.max, n: s.n };
 }
 
 async function fetchAllStations() {
@@ -168,6 +168,7 @@ function readingsFromPetrolmate(state, snap) {
     if (!v) continue;
     readings[fuel] = {
       avg: v.avg,
+      med: null,
       min: v.min,
       max: v.max,
       n: v.n,
