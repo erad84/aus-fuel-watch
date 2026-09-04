@@ -1,6 +1,6 @@
 {
  "v": 1,
- "source": "FuelWatch WA (Department of Energy, Mines, Industry Regulation and Safety); MyFuel NT (NT Consumer Affairs); SA Fuel Pricing Information Scheme (SAFPIS); Fuel Prices Queensland (Queensland Government); Petrolmate (petrolmate.com.au)",
+ "source": "official open-data archives + collector",
  "windowDays": 90,
  "units": "tenths of a cent per litre",
  "fuels": [
