@@ -128,7 +128,10 @@ async function importQld(cacheDir, days) {
     ingestQldFile(file, startIso, endIso, stationsByDay);
   }
 
-  return readingsByStateAndDay(stationsByDay, { preferMetro: true });
+  return {
+    byState: readingsByStateAndDay(stationsByDay, { preferMetro: true }),
+    stationsByDay,
+  };
 }
 
 module.exports = { ATTRIBUTION, importQld, dayRange };

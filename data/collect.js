@@ -4,7 +4,8 @@
 //
 // Fetches station-level prices from official adapters, aggregates to state and
 // capital-metro averages, and falls back to Petrolmate /api/summary only for
-// jurisdictions without a station source yet (VIC, QLD).
+// jurisdictions without a station source yet (VIC). Also records per-station
+// daily prices under docs/v1/stations/ (separate from phone-facing aggregates).
 //
 // Writes are idempotent and only ever fill an empty slot.
 //
@@ -18,10 +19,10 @@ const path = require('path');
 const sources = require('./lib/sources');
 const aggregate = require('./lib/aggregate');
 const history = require('./lib/history');
+const stationHistory = require('./lib/stationHistory');
 const cyclefit = require('./lib/cyclefit');
 const { FUELS } = require('./lib/fuels');
 const { STATES, localParts } = require('./lib/states');
-
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, '..', 'docs');
 
 const WINDOW_START_HOUR = 7;
@@ -53,7 +54,10 @@ function minStations(state, fuel, sampled) {
 function checkReading(file, fuel, iso, reading, premiumInverted, opts) {
   const sampled = opts && opts.sampled;
   const state = opts && opts.state;
-  const minN = minStations(state, fuel, sampled);
+  const scope = opts && opts.scope;
+  let minN = minStations(state, fuel, sampled);
+  // Regional markets are thinner; still useful above a modest floor.
+  if (scope === 'regional') minN = Math.min(minN, 10);
 
   if (reading.avg === null) return 'avg missing or non-numeric';
   if (reading.avg < MIN_PLAUSIBLE || reading.avg > MAX_PLAUSIBLE) {
@@ -66,12 +70,12 @@ function checkReading(file, fuel, iso, reading, premiumInverted, opts) {
     return `only ${reading.n} stations`;
   }
 
-  const medN = history.trailingMedian(file, fuel, iso, 14, 'n');
+  const medN = history.trailingMedian(file, fuel, iso, 14, 'n', scope);
   if (medN !== null && reading.n !== null && reading.n < MIN_COVERAGE_RATIO * medN) {
     return `station count ${reading.n} below ${Math.round(MIN_COVERAGE_RATIO * 100)}% of trailing median ${medN}`;
   }
 
-  const medAvg = history.trailingMedian(file, fuel, iso, 14, 'avg');
+  const medAvg = history.trailingMedian(file, fuel, iso, 14, 'avg', scope);
   if (medAvg !== null && Math.abs(reading.avg - medAvg) > MAX_DAILY_MOVE) {
     return `avg ${fmt(reading.avg)}c is ${fmt(Math.abs(reading.avg - medAvg))}c from trailing median ${fmt(medAvg)}c`;
   }
@@ -122,7 +126,20 @@ function resolveParams(file) {
 
 function statsToReading(s) {
   if (!s) return null;
-  return { avg: s.avg, med: s.med, min: s.min, max: s.max, n: s.n };
+  return { avg: s.avg, gmean: s.gmean, mode: s.mode, med: s.med, min: s.min, max: s.max, n: s.n };
+}
+
+/** Metro / regional / statewide readings from one state's aggregate buckets. */
+function readingsByScope(scopes) {
+  const out = {};
+  for (const scope of history.SCOPES) {
+    out[scope] = {};
+    for (const fuel of FUELS) {
+      const r = statsToReading(scopes[scope]?.[fuel]);
+      if (r) out[scope][fuel] = r;
+    }
+  }
+  return out;
 }
 
 async function fetchAllStations() {
@@ -146,19 +163,6 @@ async function fetchAllStations() {
   return { stations, attributions, notes, sampledStates };
 }
 
-function readingsFromAggregate(scopes, preferMetro) {
-  const readings = {};
-  for (const fuel of FUELS) {
-    const s =
-      preferMetro && scopes.metro[fuel]
-        ? scopes.metro[fuel]
-        : scopes.state[fuel] || scopes.metro[fuel];
-    const r = statsToReading(s);
-    if (r) readings[fuel] = r;
-  }
-  return readings;
-}
-
 function readingsFromPetrolmate(state, snap) {
   const byFuel = snap.states[state];
   if (!byFuel) return {};
@@ -168,6 +172,8 @@ function readingsFromPetrolmate(state, snap) {
     if (!v) continue;
     readings[fuel] = {
       avg: v.avg,
+      gmean: null,
+      mode: null,
       med: null,
       min: v.min,
       max: v.max,
@@ -212,17 +218,26 @@ async function main() {
   let wrote = 0;
   let rejected = 0;
   let skipped = 0;
+  let stationDaysWrote = 0;
+  let stationRowsWrote = 0;
 
   for (const state of STATES) {
     const scopes = agg[state];
     const fromStations = Boolean(scopes);
-    const readings = fromStations
-      ? readingsFromAggregate(scopes, true)
+    const scopedReadings = fromStations
+      ? readingsByScope(scopes)
       : petrolmateSnap
-      ? readingsFromPetrolmate(state, petrolmateSnap)
+      ? { state: readingsFromPetrolmate(state, petrolmateSnap) }
       : {};
 
-    if (!Object.keys(readings).length) {
+    const primaryScope = fromStations
+      ? scopedReadings.metro && Object.keys(scopedReadings.metro).length
+        ? 'metro'
+        : 'state'
+      : 'state';
+    const readings = scopedReadings[primaryScope] || {};
+
+    if (!Object.keys(readings).length && !Object.values(scopedReadings).some((r) => Object.keys(r || {}).length)) {
       console.log(`${state}: no readings`);
       continue;
     }
@@ -232,6 +247,7 @@ async function main() {
     const file = history.load(DOCS_DIR, state);
 
     history.roll(DOCS_DIR, file, day);
+    stationHistory.rollState(DOCS_DIR, state, day);
 
     const premiumInverted =
       readings.P95 &&
@@ -240,52 +256,103 @@ async function main() {
       readings.P98.avg !== null &&
       readings.P95.avg > readings.P98.avg;
 
-    const checkOpts = { sampled: sampledStates.has(state), state };
     const notes = [];
 
-    for (const fuel of FUELS) {
-      const reading = readings[fuel];
-      if (!reading) continue;
+    for (const scope of history.SCOPES) {
+      const scopeReadings = scopedReadings[scope] || {};
+      for (const fuel of FUELS) {
+        const reading = scopeReadings[fuel];
+        if (!reading) continue;
 
-      if (!history.isSlotEmpty(file, fuel, day)) {
-        skipped++;
-        continue;
-      }
-      if (!inWindow && !catchup) {
-        skipped++;
-        continue;
-      }
-
-      const reason = checkReading(file, fuel, day, reading, premiumInverted, checkOpts);
-      if (reason) {
-        const rec = file.rejects[fuel] || { count: 0, last: null };
-        if (!rec.last || rec.last.date !== day) {
-          rec.count++;
-          rec.last = { date: day, reason };
-          file.rejects[fuel] = rec;
+        if (!inWindow && !catchup) {
+          skipped++;
+          continue;
         }
-        notes.push(`  reject ${fuel}: ${reason}`);
-        rejected++;
-        continue;
-      }
 
-      history.setDay(file, fuel, day, reading);
-      notes.push(
-        `  wrote ${fuel}: avg ${fmt(reading.avg)}c  min ${fmt(reading.min)}  max ${fmt(reading.max)}  n ${reading.n}`
-      );
-      wrote++;
+        const checkOpts = { sampled: sampledStates.has(state), state, scope };
+        const existing = history.getDay(file, fuel, day, scope);
+        if (existing) {
+          let filled = false;
+          if (reading.gmean != null && existing.gmean == null) {
+            const reason = checkReading(file, fuel, day, reading, premiumInverted, checkOpts);
+            if (reason) {
+              notes.push(`  skip gmean ${scope}/${fuel}: ${reason}`);
+            } else {
+              history.setGmean(file, fuel, day, reading.gmean, scope);
+              notes.push(`  gmean ${scope}/${fuel}: ${fmt(reading.gmean)}c`);
+              wrote++;
+              filled = true;
+            }
+          }
+          if (reading.mode != null && existing.mode == null) {
+            const reason = checkReading(file, fuel, day, reading, premiumInverted, checkOpts);
+            if (reason) {
+              notes.push(`  skip mode ${scope}/${fuel}: ${reason}`);
+            } else {
+              history.setMode(file, fuel, day, reading.mode, scope);
+              notes.push(`  mode ${scope}/${fuel}: ${fmt(reading.mode)}c`);
+              wrote++;
+              filled = true;
+            }
+          }
+          if (!filled) skipped++;
+          continue;
+        }
+
+        const reason = checkReading(file, fuel, day, reading, premiumInverted, checkOpts);
+        if (reason) {
+          if (scope === primaryScope) {
+            const rec = file.rejects[fuel] || { count: 0, last: null };
+            if (!rec.last || rec.last.date !== day) {
+              rec.count++;
+              rec.last = { date: day, reason };
+              file.rejects[fuel] = rec;
+            }
+          }
+          notes.push(`  reject ${scope}/${fuel}: ${reason}`);
+          rejected++;
+          continue;
+        }
+
+        history.setDay(file, fuel, day, reading, scope);
+        notes.push(
+          `  wrote ${scope}/${fuel}: avg ${fmt(reading.avg)}c  n ${reading.n}`
+        );
+        wrote++;
+      }
+    }
+
+    // Per-station board for this local day (states with a station adapter).
+    if (fromStations && (inWindow || catchup) && !dryRun) {
+      const stateStations = stations.filter((s) => s.state === state);
+      const stWrite = stationHistory.writeDay(DOCS_DIR, state, day, stateStations, {
+        onlyEmpty: true,
+      });
+      if (stWrite.wrote) {
+        stationDaysWrote++;
+        stationRowsWrote += stWrite.stations;
+        notes.push(`  stations: recorded ${stWrite.stations} outlet(s)`);
+      } else if (!stationHistory.isDayEmpty(DOCS_DIR, state, day)) {
+        notes.push('  stations: day already recorded');
+      }
+    } else if (fromStations && !dryRun && !inWindow && !catchup) {
+      notes.push('  stations: skipped (outside collect window)');
+    } else if (fromStations && dryRun && (inWindow || catchup)) {
+      const stateStations = stations.filter((s) => s.state === state && Object.keys(s.prices || {}).length);
+      notes.push(`  stations: would record ~${stateStations.length} outlet(s)`);
     }
 
     file.params = resolveParams(file);
     file.generated = new Date().toISOString();
-    file.granularity = fromStations ? 'metro' : 'state';
+    file.defaultScope = fromStations ? 'metro' : 'state';
+    history.syncPrimaryFuels(file);
     file.sourceGeneratedAt = petrolmateSnap ? petrolmateSnap.generatedAt : file.generated;
     file.attribution = attributionParts.join('; ');
 
     console.log(
       `${state}: local ${day} ${String(hour).padStart(2, '0')}h ${
         inWindow ? 'in-window' : catchup ? 'catch-up' : 'out-of-window'
-      }, ${file.granularity} series, ${file.days} day(s) held`
+      }, scopes metro/regional/state, default=${file.defaultScope}, ${file.days} day(s) held`
     );
     for (const n of notes) console.log(n);
 
@@ -293,6 +360,7 @@ async function main() {
   }
 
   if (!dryRun) {
+    stationHistory.writeIndex(DOCS_DIR, STATES);
     const index = {
       v: history.SCHEMA,
       source: attributionParts.join('; '),
@@ -300,6 +368,10 @@ async function main() {
       units: 'tenths of a cent per litre',
       fuels: FUELS,
       states: STATES.map((s) => ({ code: s, file: `${s}.json` })),
+      stations: {
+        index: 'stations/index.json',
+        note: 'Per-station daily prices (not downloaded by the watch)',
+      },
     };
     const indexPath = path.join(DOCS_DIR, 'v1', 'index.json');
     fs.mkdirSync(path.dirname(indexPath), { recursive: true });
@@ -310,7 +382,8 @@ async function main() {
   }
 
   console.log(
-    `\n${dryRun ? '[dry run] ' : ''}wrote ${wrote}, rejected ${rejected}, skipped ${skipped}, files changed ${changedFiles}`
+    `\n${dryRun ? '[dry run] ' : ''}wrote ${wrote}, rejected ${rejected}, skipped ${skipped}, files changed ${changedFiles}` +
+      `, station-days ${stationDaysWrote} (${stationRowsWrote} outlet rows)`
   );
 }
 

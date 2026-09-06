@@ -2,6 +2,20 @@
 
 const DAY_MS = 86400000;
 const E10_ENERGY_RATIO = 0.97;
+
+/** Tooltip Y follows the mouse; X stays near the hovered day column. */
+if (typeof Chart !== 'undefined' && Chart.Tooltip?.positioners) {
+  Chart.Tooltip.positioners.mouseHeight = function (items, eventPosition) {
+    const base =
+      typeof Chart.Tooltip.positioners.nearest === 'function'
+        ? Chart.Tooltip.positioners.nearest.call(this, items, eventPosition)
+        : null;
+    return {
+      x: base?.x ?? eventPosition.x,
+      y: eventPosition.y,
+    };
+  };
+}
 const FUEL_LABELS = {
   U91: 'Unleaded 91',
   E10: 'E10',
@@ -9,6 +23,14 @@ const FUEL_LABELS = {
   P98: 'Premium 98',
   DSL: 'Diesel',
   PDSL: 'Premium diesel',
+};
+const SCOPE_IDS = ['metro', 'regional', 'state'];
+/** Disable a scope option when latest station count is below this. */
+const MIN_SCOPE_N = 25;
+const MIN_SCOPE_N_OVERRIDE = {
+  TAS: { E10: 2 },
+  ACT: { DSL: 10, regional: 5 },
+  NT: { regional: 10 },
 };
 const PETROLMATE_FUEL = {
   ULP: 'U91',
@@ -48,15 +70,289 @@ const MAX_RADIUS_M = 25000;
 /** @type {Record<string, {date: string, prices: Record<string, number>}>} */
 const stationSnapshots = {};
 
+/** Published per-station history from docs/v1/stations/ */
+const publishedStationCache = {
+  catalogs: /** @type {Record<string, object>} */ ({}),
+  days: /** @type {Record<string, object>} */ ({}),
+};
+/** @type {{ state: string, publishedId: string, byDate: Map<string, number>, daysLoaded: number } | null} */
+let selectedPublishedHistory = null;
+
 /** Series + params for chart hover → cycle dial sync */
 let chartCycleCtx = {
   series: [],
+  fullSeries: [],
   params: null,
   turns: [],
+  fftOverlay: null,
+  statePoint: null,
   state: null,
+  modelId: 'current',
   latestStage: null,
-  hoverIndex: null,
+  /** Sticky last-hovered day; dial + yellow cursor stay here until another day is hovered. */
+  selectedIndex: null,
 };
+
+function selectedCycleModelId() {
+  const el = document.getElementById('cycleModelSelect');
+  const raw = el?.value || localStorage.getItem(CycleModels.STORAGE_KEY) || CycleModels.DEFAULT_ID;
+  return CycleModels.get(raw).id;
+}
+
+/** WA always uses the FuelWatch weekly model (Current), regardless of dropdown. */
+function effectiveCycleModelId(state) {
+  if (state === 'WA') return 'current';
+  return selectedCycleModelId();
+}
+
+function populateCycleModelSelect() {
+  const el = document.getElementById('cycleModelSelect');
+  if (!el || !window.CycleModels) return;
+  const saved = localStorage.getItem(CycleModels.STORAGE_KEY) || CycleModels.DEFAULT_ID;
+  el.innerHTML = CycleModels.MODELS.map(
+    (m) =>
+      `<option value="${m.id}"${m.id === saved ? ' selected' : ''}>${escapeHtml(m.label)}</option>`
+  ).join('');
+}
+
+function pct(n) {
+  return `${Math.round(Number(n) * 100)}%`;
+}
+
+function applyTurnTuneToInputs() {
+  if (!window.CycleModels?.getTurnTune) return;
+  const t = CycleModels.getTurnTune();
+  const sens = document.getElementById('tuneTurnSensitivity');
+  const gap = document.getElementById('tuneTurnMinGap');
+  const coarse = document.getElementById('tuneTurnCoarseness');
+  const fft = document.getElementById('tuneTurnFft');
+  if (sens) sens.value = String(t.sensitivity);
+  if (gap) gap.value = String(t.minGapDays);
+  if (coarse) coarse.value = String(t.coarseness);
+  if (fft) fft.value = String(t.fftAssist ?? 0);
+  updateTurnTuneLabels();
+}
+
+function updateTurnTuneLabels() {
+  if (!window.CycleModels?.getTurnTune) return;
+  const t = CycleModels.getTurnTune();
+  const sensEl = document.getElementById('tuneTurnSensitivityVal');
+  const gapEl = document.getElementById('tuneTurnMinGapVal');
+  const coarseEl = document.getElementById('tuneTurnCoarsenessVal');
+  const fftEl = document.getElementById('tuneTurnFftVal');
+  if (sensEl) sensEl.textContent = String(t.sensitivity);
+  if (gapEl) gapEl.textContent = `${t.minGapDays}d`;
+  if (coarseEl) coarseEl.textContent = String(t.coarseness);
+  if (fftEl) fftEl.textContent = String(t.fftAssist ?? 0);
+}
+
+let turnTuneRefreshTimer = null;
+function onTurnTuneInput() {
+  if (!window.CycleModels?.setTurnTune) return;
+  CycleModels.setTurnTune({
+    sensitivity: Number(document.getElementById('tuneTurnSensitivity')?.value),
+    minGapDays: Number(document.getElementById('tuneTurnMinGap')?.value),
+    coarseness: Number(document.getElementById('tuneTurnCoarseness')?.value),
+    fftAssist: Number(document.getElementById('tuneTurnFft')?.value),
+  });
+  updateTurnTuneLabels();
+  clearTimeout(turnTuneRefreshTimer);
+  turnTuneRefreshTimer = setTimeout(() => {
+    refreshCharts().catch((e) => setStatus(`Error: ${e.message}`));
+  }, 120);
+}
+
+function initTurnTuneControls() {
+  applyTurnTuneToInputs();
+  for (const id of [
+    'tuneTurnSensitivity',
+    'tuneTurnMinGap',
+    'tuneTurnCoarseness',
+    'tuneTurnFft',
+  ]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.oninput = onTurnTuneInput;
+  }
+  const reset = document.getElementById('tuneTurnReset');
+  if (reset) {
+    reset.onclick = () => {
+      CycleModels.resetTurnTune();
+      applyTurnTuneToInputs();
+      refreshCharts().catch((e) => setStatus(`Error: ${e.message}`));
+    };
+  }
+}
+
+function syncWaWeeklyAfterLastVisibility() {
+  const label = document.getElementById('waWeeklyAfterLastLabel');
+  if (!label) return;
+  const state = document.getElementById('stateSelect')?.value;
+  label.classList.toggle('hidden', state !== 'WA');
+}
+
+function initWaWeeklyAfterLastControl() {
+  const el = document.getElementById('waWeeklyAfterLast');
+  if (!el || !window.CycleModels?.waWeeklyAfterLastEnabled) return;
+  el.checked = CycleModels.waWeeklyAfterLastEnabled();
+  el.onchange = () => {
+    CycleModels.setWaWeeklyAfterLast(el.checked);
+    refreshCharts().catch((e) => setStatus(`Error: ${e.message}`));
+  };
+  syncWaWeeklyAfterLastVisibility();
+}
+
+function syncArcpathTuneVisibility() {
+  const box = document.getElementById('arcpathTune');
+  if (!box) return;
+  const show = selectedCycleModelId() === 'arcpath';
+  box.classList.toggle('hidden', !show);
+  requestAnimationFrame(() => syncChartHeightToSummary());
+}
+
+function initTuneFoldHeightSync() {
+  for (const id of ['turnDetectFold', 'arcpathTune']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener('toggle', () => {
+      requestAnimationFrame(() => syncChartHeightToSummary());
+    });
+  }
+}
+
+function applyArcpathTuneToInputs() {
+  if (!window.CycleModels?.getArcpathTune) return;
+  const t = CycleModels.getArcpathTune();
+  const base = document.getElementById('tunePathBase');
+  const scale = document.getElementById('tunePathScale');
+  const edge = document.getElementById('tuneExtremeEdge');
+  const prior = document.getElementById('tunePriorExtreme');
+  const fftDial = document.getElementById('tuneFftDial');
+  if (base) base.value = String(Math.round(t.pathBase * 100));
+  if (scale) scale.value = String(Math.round(t.pathScale * 100));
+  if (edge) edge.value = String(Math.round(t.extremeEdge * 100));
+  if (prior) prior.value = String(Math.round((t.priorExtreme ?? 0) * 100));
+  if (fftDial) fftDial.value = String(Math.round((t.fftDial ?? 0) * 100));
+  updateArcpathTuneLabels();
+}
+
+function updateArcpathTuneLabels() {
+  if (!window.CycleModels?.getArcpathTune) return;
+  const t = CycleModels.getArcpathTune();
+  const baseEl = document.getElementById('tunePathBaseVal');
+  const scaleEl = document.getElementById('tunePathScaleVal');
+  const edgeEl = document.getElementById('tuneExtremeEdgeVal');
+  const priorEl = document.getElementById('tunePriorExtremeVal');
+  const fftEl = document.getElementById('tuneFftDialVal');
+  const hint = document.getElementById('tuneArcpathHint');
+  if (baseEl) baseEl.textContent = pct(t.pathBase);
+  if (scaleEl) scaleEl.textContent = pct(t.pathScale);
+  if (edgeEl) edgeEl.textContent = pct(t.extremeEdge);
+  if (priorEl) priorEl.textContent = pct(t.priorExtreme ?? 0);
+  if (fftEl) fftEl.textContent = pct(t.fftDial ?? 0);
+  if (hint) {
+    const lo = Math.round(t.pathBase * 100);
+    const hi = Math.round((t.pathBase + t.pathScale) * 100);
+    hint.textContent =
+      `Path ≈ ${lo}–${Math.min(100, hi)}% (rest arc), prior ${Math.round((t.priorExtreme ?? 0) * 100)}%, ` +
+      `FFT dial ${Math.round((t.fftDial ?? 0) * 100)}%. Peak/bottom width ${Math.round(t.extremeEdge * 100)}%.`;
+  }
+}
+
+function restageCycleDialFromTune() {
+  const series = chartCycleCtx.series;
+  if (!series?.length) return;
+  const idx =
+    chartCycleCtx.selectedIndex != null && chartCycleCtx.selectedIndex >= 0
+      ? chartCycleCtx.selectedIndex
+      : series.length - 1;
+  const stage = cycleStageForIndex(idx);
+  if (idx === series.length - 1) chartCycleCtx.latestStage = stage;
+  renderCycleDial(stage, {
+    asOf: series[idx]?.date,
+  });
+}
+
+function onArcpathTuneInput() {
+  if (!window.CycleModels?.setArcpathTune) return;
+  const base = Number(document.getElementById('tunePathBase')?.value);
+  const scale = Number(document.getElementById('tunePathScale')?.value);
+  const edge = Number(document.getElementById('tuneExtremeEdge')?.value);
+  const prior = Number(document.getElementById('tunePriorExtreme')?.value);
+  const fftDial = Number(document.getElementById('tuneFftDial')?.value);
+  CycleModels.setArcpathTune({
+    pathBase: base / 100,
+    pathScale: scale / 100,
+    extremeEdge: edge / 100,
+    priorExtreme: prior / 100,
+    fftDial: fftDial / 100,
+  });
+  updateArcpathTuneLabels();
+  restageCycleDialFromTune();
+}
+
+function initArcpathTuneControls() {
+  applyArcpathTuneToInputs();
+  syncArcpathTuneVisibility();
+  for (const id of [
+    'tunePathBase',
+    'tunePathScale',
+    'tuneExtremeEdge',
+    'tunePriorExtreme',
+    'tuneFftDial',
+  ]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.oninput = onArcpathTuneInput;
+  }
+  const reset = document.getElementById('tuneArcpathReset');
+  if (reset) {
+    reset.onclick = () => {
+      CycleModels.resetArcpathTune();
+      applyArcpathTuneToInputs();
+      restageCycleDialFromTune();
+    };
+  }
+}
+
+/** Match history chart plot height so the chart panel bottom aligns with Summary. */
+function syncChartHeightToSummary() {
+  const summary = document.querySelector('.panel-summary');
+  const chartPanel = document.querySelector('.panel-chart');
+  const wrap = document.querySelector('.panel-chart .chart-wrap');
+  if (!summary || !chartPanel || !wrap) return;
+  if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches) {
+    wrap.style.height = '';
+    historyChart?.resize();
+    return;
+  }
+  const summaryH = summary.getBoundingClientRect().height;
+  if (summaryH < 200) return;
+
+  const panelStyle = getComputedStyle(chartPanel);
+  const padY =
+    (parseFloat(panelStyle.paddingTop) || 0) + (parseFloat(panelStyle.paddingBottom) || 0);
+  let chrome = 0;
+  for (const child of chartPanel.children) {
+    if (child === wrap || child.classList?.contains('chart-wrap')) continue;
+    const r = child.getBoundingClientRect();
+    const cs = getComputedStyle(child);
+    chrome += r.height + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+  }
+  const h = Math.max(200, Math.round(summaryH - padY - chrome));
+  const next = `${h}px`;
+  if (wrap.style.height !== next) wrap.style.height = next;
+  historyChart?.resize();
+}
+
+function watchSummaryChartHeight() {
+  const summary = document.querySelector('.panel-summary');
+  if (!summary || typeof ResizeObserver === 'undefined') return;
+  const ro = new ResizeObserver(() => {
+    syncChartHeightToSummary();
+  });
+  ro.observe(summary);
+}
 
 function isoToDayNum(iso) {
   return Math.round(Date.parse(iso + 'T00:00:00Z') / DAY_MS);
@@ -107,6 +403,7 @@ function setStatus(msg) {
 
 async function fetchJson(url, opts = {}) {
   const res = await fetch(url, {
+    cache: 'no-store',
     ...opts,
     headers: {
       Accept: 'application/json',
@@ -117,23 +414,90 @@ async function fetchJson(url, opts = {}) {
   return res.json();
 }
 
-function expandFileSeries(file, fuel) {
-  const s = file.fuels?.[fuel];
+function expandFileSeries(file, fuel, scope) {
+  const fuels = fuelsForScope(file, scope);
+  const s = fuels?.[fuel];
   if (!file.start || !s) return [];
   const start = isoToDayNum(file.start);
-  const out = [];
+  let first = -1;
+  let last = -1;
   for (let i = 0; i < file.days; i++) {
-    if (s.avg[i] == null) continue;
+    if (
+      s.avg[i] != null ||
+      s.gmean?.[i] != null ||
+      s.mode?.[i] != null ||
+      s.med?.[i] != null ||
+      s.min?.[i] != null ||
+      s.max?.[i] != null
+    ) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  }
+  if (first < 0) return [];
+
+  const out = [];
+  for (let i = first; i <= last; i++) {
     out.push({
       date: dayNumToISO(start + i),
-      avg: s.avg[i] / 10,
+      avg: s.avg[i] != null ? s.avg[i] / 10 : null,
+      gmean: s.gmean?.[i] != null ? s.gmean[i] / 10 : null,
+      mode: s.mode?.[i] != null ? s.mode[i] / 10 : null,
       med: s.med?.[i] != null ? s.med[i] / 10 : null,
-      min: s.min[i] / 10,
-      max: s.max[i] / 10,
-      n: s.n[i],
+      min: s.min?.[i] != null ? s.min[i] / 10 : null,
+      max: s.max?.[i] != null ? s.max[i] / 10 : null,
+      n: s.n?.[i] ?? null,
     });
   }
   return out;
+}
+
+function fuelsForScope(file, scope) {
+  if (file.scopes?.[scope]) return file.scopes[scope];
+  // Legacy single-series files: expose only under their published granularity.
+  if (!file.scopes) {
+    const legacy = file.granularity === 'metro' ? 'metro' : 'state';
+    if (!scope || scope === legacy) return file.fuels;
+    return null;
+  }
+  return null;
+}
+
+function latestScopeN(file, fuel, scope) {
+  const s = fuelsForScope(file, scope)?.[fuel];
+  if (!s?.n) return null;
+  for (let i = s.n.length - 1; i >= 0; i--) {
+    if (s.n[i] != null) return s.n[i];
+  }
+  return null;
+}
+
+function minScopeN(state, fuel, scope) {
+  const byState = MIN_SCOPE_N_OVERRIDE[state];
+  if (byState) {
+    if (byState[fuel] !== undefined) return byState[fuel];
+    if (scope === 'regional' && byState.regional !== undefined) return byState.regional;
+  }
+  return scope === 'regional' ? Math.min(MIN_SCOPE_N, 10) : MIN_SCOPE_N;
+}
+
+function scopeIsAvailable(file, fuel, scope) {
+  if (!file.scopes) {
+    const legacy = file.granularity === 'metro' ? 'metro' : 'state';
+    if (scope !== legacy) return false;
+  }
+  const series = expandFileSeries(file, fuel, scope);
+  if (!series.some((p) => p.avg != null)) return false;
+  const n = latestScopeN(file, fuel, scope);
+  if (n == null) return true;
+  return n >= minScopeN(file.state, fuel, scope);
+}
+
+function preferredScope(file, fuel) {
+  for (const sc of ['metro', 'state', 'regional']) {
+    if (scopeIsAvailable(file, fuel, sc)) return sc;
+  }
+  return file.defaultScope || file.granularity || 'metro';
 }
 
 function mergeArchiveIntoSeries(archiveByFuel, fuel, dayMap) {
@@ -144,6 +508,8 @@ function mergeArchiveIntoSeries(archiveByFuel, fuel, dayMap) {
       dayMap[date] = {
         date,
         avg: row.avg / 10,
+        gmean: row.gmean != null ? row.gmean / 10 : null,
+        mode: row.mode != null ? row.mode / 10 : null,
         med: row.med != null ? row.med / 10 : null,
         min: row.min / 10,
         max: row.max / 10,
@@ -173,10 +539,15 @@ async function loadArchivesForState(state) {
   return byFuel;
 }
 
-function buildMergedSeries(file, archiveByFuel, fuel) {
+function buildMergedSeries(file, archiveByFuel, fuel, scope) {
   const dayMap = {};
-  mergeArchiveIntoSeries(archiveByFuel, fuel, dayMap);
-  for (const p of expandFileSeries(file, fuel)) dayMap[p.date] = p;
+  const sc = scope || file.defaultScope || file.granularity || 'metro';
+  // Archives are a single legacy series — only overlay on the default/primary scope.
+  const primary = file.defaultScope || file.granularity || 'metro';
+  if (sc === primary || !file.scopes) {
+    mergeArchiveIntoSeries(archiveByFuel, fuel, dayMap);
+  }
+  for (const p of expandFileSeries(file, fuel, sc)) dayMap[p.date] = p;
   return Object.values(dayMap).sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
@@ -190,14 +561,21 @@ function seriesStats(points) {
   if (!points.length) return null;
   const mins = points.map((p) => p.min).filter((v) => v != null);
   const maxs = points.map((p) => p.max).filter((v) => v != null);
-  const latest = points[points.length - 1];
+  let latest = null;
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (points[i]?.avg != null) {
+      latest = points[i];
+      break;
+    }
+  }
+  if (!latest) latest = points[points.length - 1];
   return {
     latest,
     currentLow: latest.min ?? null,
     currentHigh: latest.max ?? null,
     periodLow: mins.length ? Math.min(...mins) : null,
     periodHigh: maxs.length ? Math.max(...maxs) : null,
-    days: points.length,
+    days: points.filter((p) => p.avg != null).length,
   };
 }
 
@@ -206,7 +584,10 @@ function scopeLabel(state, scope) {
     const city = CAPITALS[state]?.name;
     return city ? `${city} metro` : `${state} metro`;
   }
-  return state;
+  if (scope === 'regional') {
+    return `${state} regional`;
+  }
+  return `${state} statewide`;
 }
 
 function selectedScope() {
@@ -223,10 +604,10 @@ function selectedPeriod() {
  */
 function inferCycleStage(points, params) {
   const base = { confidence: params?.confidence || 'none', angle: null, placed: false };
-  if (points.length < 5) {
+  const avgs = points.map((p) => p.avg).filter((v) => v != null);
+  if (avgs.length < 5) {
     return { ...base, stage: 'unknown', label: 'Not enough history' };
   }
-  const avgs = points.map((p) => p.avg);
   const latest = avgs[avgs.length - 1];
   const minAvg = Math.min(...avgs);
   const maxAvg = Math.max(...avgs);
@@ -299,373 +680,87 @@ function priceRangeInSpan(series, from, to) {
   return { lo, hi };
 }
 
-/** Mean c/L change per day from a marker index to dataIndex (never before the marker). */
-function slopeSinceMarker(series, dataIndex, markerIndex) {
-  if (dataIndex <= markerIndex) return 0;
-  const a = seriesAvgAt(series, markerIndex);
-  const b = seriesAvgAt(series, dataIndex);
-  if (a == null || b == null) return 0;
-  return (b - a) / (dataIndex - markerIndex);
-}
-
-/** WA FuelWatch weekly sawtooth: ~2-day spike, ~5-day grind (period ≈ 7). */
-const WA_CYCLE = { period: 7, riseDays: 2, fallDays: 5 };
-
-/**
- * After last WA marker: predict dial from weekly periodicity, refined by
- * observed price since that marker (never look back before it).
- */
-function waDialAfterLastMarker(series, dataIndex, prev) {
-  const price = seriesAvgAt(series, dataIndex);
-  const anchor = seriesAvgAt(series, prev.index);
-  if (price == null || anchor == null) return null;
-
-  const { riseDays, fallDays, period } = WA_CYCLE;
-  const days = Math.max(0, dataIndex - prev.index);
-  // Phase within the expected week starting at the last confirmed turn.
-  const d = days % period;
-  const { lo, hi } = priceRangeInSpan(series, prev.index, dataIndex);
-  const refAmp = Math.max(8, (hi ?? price) - (lo ?? price), Math.abs(price - anchor), 0.05);
-
-  if (prev.type === 'trough') {
-    // Expect: bottom → peak over riseDays, then peak → next bottom over fallDays.
-    if (d <= riseDays) {
-      const timeU = riseDays <= 0 ? 1 : d / riseDays;
-      const priceU = clamp01((price - anchor) / refAmp);
-      const u = clamp01(0.6 * timeU + 0.4 * priceU);
-      return 180 + u * 180; // bottom → peak (rising arc)
-    }
-    const timeU = (d - riseDays) / fallDays;
-    const peakEst = hi ?? Math.max(anchor, price);
-    const priceU = clamp01((peakEst - price) / Math.max(0.05, peakEst - (lo ?? anchor)));
-    const u = clamp01(0.6 * timeU + 0.4 * priceU);
-    return u * 180; // peak → bottom (falling arc)
-  }
-
-  // prev === peak: expect peak → bottom over fallDays, then rise to next peak.
-  if (d <= fallDays) {
-    const timeU = fallDays <= 0 ? 1 : d / fallDays;
-    const priceU = clamp01((anchor - price) / refAmp);
-    const u = clamp01(0.6 * timeU + 0.4 * priceU);
-    return u * 180; // peak → bottom
-  }
-  const timeU = (d - fallDays) / riseDays;
-  const troughEst = lo ?? Math.min(anchor, price);
-  const priceU = clamp01((price - troughEst) / Math.max(0.05, (hi ?? price) - troughEst));
-  const u = clamp01(0.6 * timeU + 0.4 * priceU);
-  return 180 + u * 180; // bottom → peak
-}
-
-/**
- * After the last confirmed marker: direction is price vs that line (and slope
- * since it — never lookback before the marker). Descending → falling→bottom;
- * rising → rising→peak. Flattening pulls toward the extremum.
- * WA: weekly FuelWatch periodicity predicts the stage after the last line.
- */
-function dialAngleAfterLastMarker(series, dataIndex, prev, state) {
-  if (state === 'WA') return waDialAfterLastMarker(series, dataIndex, prev);
-
-  const price = seriesAvgAt(series, dataIndex);
-  const anchor = seriesAvgAt(series, prev.index);
-  if (price == null || anchor == null) return null;
-
-  const { lo, hi } = priceRangeInSpan(series, prev.index, dataIndex);
-  const slope = slopeSinceMarker(series, dataIndex, prev.index);
-  const move = price - anchor;
-  const spanAmp = Math.max(0.05, (hi ?? price) - (lo ?? price));
-  const refAmp = Math.max(5, spanAmp);
-  const steepness = clamp01(Math.abs(slope) / Math.max(0.15, refAmp * 0.08));
-  const flatness = 1 - steepness;
-
-  const rising = move > 0.05 || (move >= 0 && slope > 0);
-  const falling = move < -0.05 || (move <= 0 && slope < 0);
-
-  if (rising && !falling) {
-    const riseProg = clamp01(move / refAmp);
-    const along = clamp01(0.35 * flatness + 0.65 * riseProg);
-    return 270 + along * 90;
-  }
-
-  if (falling && !rising) {
-    const dropProg = clamp01((-move) / refAmp);
-    const along = clamp01(0.35 * flatness + 0.65 * dropProg);
-    return 90 + along * 90;
-  }
-
-  return prev.type === 'trough' ? 180 : prev.type === 'peak' ? 0 : 180;
-}
-
-/**
- * Dial from price relative to surrounding peak/bottom marker prices.
- * Green→red: rising arc. Red→green: falling arc.
- * WA uses asymmetric weekly mapping (fast rise, slow fall).
- */
-function inferCycleStageFromTurns(dataIndex, turns, series, params, state) {
-  const base = {
-    confidence: params?.confidence || 'none',
-    angle: null,
-    placed: false,
-    source: turns?.length ? 'markers' : 'none',
-  };
-  const labels = {
-    peak: 'Peak',
-    falling: 'Falling',
-    bottom: 'Bottom',
-    rising: 'Rising',
-    unknown: 'Unclear',
-  };
-  if (!turns?.length || !series?.length || dataIndex == null || dataIndex < 0) {
-    return { ...base, stage: 'unknown', label: labels.unknown };
-  }
-
-  const price = seriesAvgAt(series, dataIndex);
-  if (price == null) return { ...base, stage: 'unknown', label: labels.unknown };
-
-  const hit = turns.find((t) => t.index === dataIndex);
-  if (hit) {
-    if (hit.type === 'peak') {
-      return { ...base, stage: 'peak', label: labels.peak, angle: 0, placed: true };
-    }
-    return { ...base, stage: 'bottom', label: labels.bottom, angle: 180, placed: true };
-  }
-
-  let prev = null;
-  let next = null;
-  for (const t of turns) {
-    if (t.index < dataIndex) prev = t;
-    else if (t.index > dataIndex) {
-      next = t;
-      break;
-    }
-  }
-
-  let angle;
-  if (prev && next) {
-    const a = seriesAvgAt(series, prev.index);
-    const b = seriesAvgAt(series, next.index);
-    if (a == null || b == null || Math.abs(b - a) < 0.05) {
-      return { ...base, stage: 'unknown', label: labels.unknown };
-    }
-    const dayProg = (dataIndex - prev.index) / Math.max(1, next.index - prev.index);
-    if (prev.type === 'trough' && next.type === 'peak') {
-      const priceProg = clamp01((price - a) / (b - a));
-      // WA spike: price dominates (steep climb). Elsewhere: price only.
-      const prog =
-        state === 'WA'
-          ? clamp01(0.85 * priceProg + 0.15 * dayProg)
-          : priceProg;
-      angle = 180 + prog * 180;
-    } else if (prev.type === 'peak' && next.type === 'trough') {
-      const priceProg = clamp01((a - price) / (a - b));
-      // WA grind-down: blend time so dial tracks the long falling week.
-      const prog =
-        state === 'WA'
-          ? clamp01(0.4 * priceProg + 0.6 * dayProg)
-          : priceProg;
-      angle = prog * 180;
-    } else if (prev.type === 'trough') {
-      const lo = Math.min(a, b);
-      const hi = Math.max(a, b);
-      const progress = clamp01((price - lo) / Math.max(0.05, hi - lo));
-      angle = 180 + progress * 180;
-    } else {
-      const lo = Math.min(a, b);
-      const hi = Math.max(a, b);
-      const progress = clamp01((hi - price) / Math.max(0.05, hi - lo));
-      angle = progress * 180;
-    }
-  } else if (prev && !next) {
-    const a = dialAngleAfterLastMarker(series, dataIndex, prev, state);
-    if (a == null) return { ...base, stage: 'unknown', label: labels.unknown };
-    angle = a;
-  } else if (!prev && next) {
-    const anchor = seriesAvgAt(series, next.index);
-    if (anchor == null) return { ...base, stage: 'unknown', label: labels.unknown };
-    const { lo, hi } = priceRangeInSpan(series, 0, next.index);
-    if (lo == null || hi == null || hi - lo < 0.05) {
-      angle = next.type === 'peak' ? 270 : 90;
-    } else if (next.type === 'peak') {
-      const progress = clamp01((price - lo) / (hi - lo));
-      angle = 180 + progress * 180;
-    } else {
-      const progress = clamp01((hi - price) / (hi - lo));
-      angle = progress * 180;
-    }
-  } else {
-    return { ...base, stage: 'unknown', label: labels.unknown };
-  }
-
-  angle = ((angle % 360) + 360) % 360;
-  const stage = stageFromDialAngle(angle);
-  return { ...base, stage, label: labels[stage], angle, placed: true };
-}
-
 function cycleStageForIndex(dataIndex) {
-  const { series, params, turns, state } = chartCycleCtx;
-  if (turns?.length) return inferCycleStageFromTurns(dataIndex, turns, series, params, state);
-  if (!series?.length) return null;
+  const { series, params, turns, state, modelId } = chartCycleCtx;
+  if (!series?.length || dataIndex == null || dataIndex < 0) return null;
+  const id = modelId || effectiveCycleModelId(state);
+  // Dial must use the same series + peak/bottom turns as the chart lines,
+  // otherwise hover/latest stages jump independently of the markers.
+  if (window.CycleModels) {
+    return CycleModels.stageAt(id, dataIndex, {
+      series,
+      turns: turns || [],
+      params,
+      state,
+    });
+  }
   return inferCycleStage(series.slice(0, dataIndex + 1), params);
 }
 
-function cycleFitCaption(stage, state) {
-  if (stage?.source === 'markers') {
-    if (state === 'WA') return ' · WA weekly FuelWatch pattern';
-    return '';
-  }
-  if (stage?.confidence && stage.confidence !== 'none') {
-    return ` · fit ${stage.confidence}`;
-  }
-  return ' · no cycle fit';
+function turnAvg(avgs, t) {
+  return t?.index != null ? avgs[t.index] : null;
+}
+
+function isStrongerTurn(avgs, candidate, incumbent) {
+  const a = turnAvg(avgs, candidate);
+  const b = turnAvg(avgs, incumbent);
+  if (candidate.type === 'peak') return (a ?? -Infinity) >= (b ?? -Infinity);
+  return (a ?? Infinity) <= (b ?? Infinity);
 }
 
 /**
- * Zigzag swing filter on mean series.
- * Does not mark the open (unconfirmed) endpoint — tomorrow may extend the extreme.
+ * Collapse overlapping candidates, then force peak↔trough alternation.
+ * Sliding windows often emit peak-peak / trough-trough pairs; keep the
+ * stronger extreme so chart lines stay a coherent cycle.
  */
-function findZigzagTurns(series, minSwingOpt) {
-  const pts = [];
-  for (let i = 0; i < series.length; i++) {
-    if (series[i]?.avg != null) pts.push({ i, v: series[i].avg });
-  }
-  if (pts.length < 5) return [];
-
-  const vals = pts.map((p) => p.v);
-  const lo = Math.min(...vals);
-  const hi = Math.max(...vals);
-  const spread = hi - lo;
-  if (spread < 2.5) return [];
-  const minSwing = minSwingOpt ?? Math.max(2.0, 0.14 * spread);
-
-  const pivots = [];
-  let dir = 0;
-  let ext = pts[0];
-  let lowSoFar = pts[0];
-  let highSoFar = pts[0];
-
-  for (let k = 1; k < pts.length; k++) {
-    const p = pts[k];
-    if (dir === 1) {
-      if (p.v >= ext.v) ext = p;
-      else if (ext.v - p.v >= minSwing) {
-        pivots.push({ index: ext.i, type: 'peak' });
-        dir = -1;
-        ext = p;
-      }
-    } else if (dir === -1) {
-      if (p.v <= ext.v) ext = p;
-      else if (p.v - ext.v >= minSwing) {
-        pivots.push({ index: ext.i, type: 'trough' });
-        dir = 1;
-        ext = p;
-      }
-    } else {
-      if (p.v < lowSoFar.v) lowSoFar = p;
-      if (p.v > highSoFar.v) highSoFar = p;
-      if (p.v - lowSoFar.v >= minSwing) {
-        pivots.push({ index: lowSoFar.i, type: 'trough' });
-        dir = 1;
-        ext = p;
-      } else if (highSoFar.v - p.v >= minSwing) {
-        pivots.push({ index: highSoFar.i, type: 'peak' });
-        dir = -1;
-        ext = p;
-      }
-    }
-  }
-
-  return pivots;
-}
-
-function isLocalExtremum(avgs, index, type, radius = 1) {
-  const v = avgs[index];
-  if (v == null) return false;
-  const lo = Math.max(0, index - radius);
-  const hi = Math.min(avgs.length - 1, index + radius);
-  for (let i = lo; i <= hi; i++) {
-    if (i === index || avgs[i] == null) continue;
-    if (type === 'peak' && avgs[i] > v) return false;
-    if (type === 'trough' && avgs[i] < v) return false;
-  }
-  return true;
-}
-
-/** Drop shallow noise troughs/peaks that aren't real local extrema. */
-function filterTurnQuality(series, turns, minSwing) {
+function consolidateVisibleTurns(series, turns, minSep) {
   const avgs = series.map((p) => (p?.avg != null ? p.avg : null));
-  const n = avgs.length;
-  let out = turns.filter((t) => {
-    // Never mark the last datum — the extreme may still be extending.
-    if (t.index >= n - 1) return false;
-    if (t.index === 0) return isLocalExtremum(avgs, 0, t.type, 1);
-    return isLocalExtremum(avgs, t.index, t.type, 1);
-  });
-
-  // Require alternating peak/trough; if two same type in a row, keep the more extreme.
-  out.sort((a, b) => a.index - b.index);
-  const alt = [];
-  for (const t of out) {
-    const prev = alt[alt.length - 1];
-    if (!prev || prev.type !== t.type) {
-      alt.push(t);
+  const sorted = [...turns].sort(
+    (a, b) => a.index - b.index || String(a.type).localeCompare(String(b.type))
+  );
+  const nearby = [];
+  for (const t of sorted) {
+    const prev = nearby[nearby.length - 1];
+    if (prev && prev.index === t.index && prev.type === t.type) continue;
+    if (prev && prev.type === t.type && t.index - prev.index < minSep) {
+      if (isStrongerTurn(avgs, t, prev)) nearby[nearby.length - 1] = t;
       continue;
     }
-    const prefer =
-      t.type === 'peak'
-        ? avgs[t.index] >= avgs[prev.index]
-        : avgs[t.index] <= avgs[prev.index];
-    if (prefer) alt[alt.length - 1] = t;
+    nearby.push(t);
   }
 
-  // Drop turns with tiny prominence vs neighbours of opposite type.
-  return alt.filter((t, i) => {
-    const prev = alt[i - 1];
-    const next = alt[i + 1];
-    let prom = 0;
-    if (prev) prom = Math.max(prom, Math.abs(avgs[t.index] - avgs[prev.index]));
-    if (next) prom = Math.max(prom, Math.abs(avgs[t.index] - avgs[next.index]));
-    if (!prev && !next) return true;
-    return prom >= Math.max(1.5, minSwing * 0.55);
-  });
-}
-
-/** Same-type markers closer than minSep days → keep the stronger. */
-function dedupeNearbyTurns(series, turns, minSep = 5) {
-  const avgs = series.map((p) => (p?.avg != null ? p.avg : null));
-  const out = [];
-  for (const t of [...turns].sort((a, b) => a.index - b.index)) {
-    const prev = out[out.length - 1];
-    if (prev && prev.type === t.type && t.index - prev.index < minSep) {
-      const prefer =
-        t.type === 'peak'
-          ? avgs[t.index] >= avgs[prev.index]
-          : avgs[t.index] <= avgs[prev.index];
-      if (prefer) out[out.length - 1] = t;
-    } else {
-      out.push(t);
+  const alt = [];
+  for (const t of nearby) {
+    const prev = alt[alt.length - 1];
+    if (prev && prev.type === t.type) {
+      if (isStrongerTurn(avgs, t, prev)) alt[alt.length - 1] = t;
+      continue;
     }
+    alt.push(t);
   }
-  return out;
+  return alt;
 }
 
 /**
- * Peak/bottom markers from confirmed zigzag swings only.
- * Incomplete end of series has no vertical line; dial uses price vs last marker.
- * WA: tune for the regular ~7-day FuelWatch sawtooth.
+ * Peak/bottom lines from turn-detect sliders on the visible Period series.
+ * Dial + prior-extreme use these same turns (no separate cycle window).
  */
-function findChartCycleMarks(series, state) {
-  const avgs = series.map((p) => p?.avg).filter((v) => v != null);
-  if (avgs.length < 5) return { turns: [] };
-  const spread = Math.max(...avgs) - Math.min(...avgs);
-  // WA weekly swings are sharp but regular — slightly softer threshold, tighter dedupe.
-  const minSwing =
-    state === 'WA' ? Math.max(1.5, 0.1 * spread) : Math.max(2.0, 0.14 * spread);
+function findChartCycleMarks(fullSeries, visibleSeries, state) {
+  if (!window.CycleModels) {
+    return { turns: [], modelId: 'current' };
+  }
+  const id = effectiveCycleModelId(state);
+  let turns = CycleModels.findTurns(id, visibleSeries, state) || [];
+  const params = CycleModels.resolveTurnDetectParams?.(state);
+  const minSep = params?.minGap ?? 5;
+  turns = consolidateVisibleTurns(visibleSeries, turns, minSep);
 
-  let turns = findZigzagTurns(series, minSwing);
-  turns = filterTurnQuality(series, turns, minSwing);
-  turns = dedupeNearbyTurns(series, turns, state === 'WA' ? 3 : 5);
-  turns = turns.filter((t) => t.index < series.length - 1);
-  turns.sort((a, b) => a.index - b.index);
-  return { turns };
+  let fftOverlay = null;
+  const tune = CycleModels.getTurnTune?.();
+  if ((tune?.fftAssist ?? 0) > 0 && CycleModels.buildFftChartOverlay) {
+    fftOverlay = CycleModels.buildFftChartOverlay(visibleSeries);
+  }
+  return { turns, modelId: id, fftOverlay };
 }
 
 const cycleTurnLinesPlugin = {
@@ -692,26 +787,56 @@ const cycleTurnLinesPlugin = {
   },
 };
 
-function syncCycleDialFromHover(dataIndex) {
-  if (dataIndex == null || dataIndex < 0) {
-    if (chartCycleCtx.hoverIndex != null) {
-      chartCycleCtx.hoverIndex = null;
-      renderCycleDial(chartCycleCtx.latestStage);
-    }
-    return;
-  }
-  if (dataIndex === chartCycleCtx.hoverIndex) return;
-  chartCycleCtx.hoverIndex = dataIndex;
-  const series = chartCycleCtx.series;
-  if (!series.length) return;
-  const stage = cycleStageForIndex(dataIndex);
-  renderCycleDial(stage, { asOf: series[dataIndex]?.date });
+/** Yellow dotted cursor for the hovered / selected day. */
+const hoverCursorLinePlugin = {
+  id: 'hoverCursorLine',
+  afterDatasetsDraw(chart, _args, opts) {
+    const idx = opts?.index;
+    if (idx == null || idx < 0) return;
+    const { ctx, chartArea, scales } = chart;
+    const xScale = scales.x;
+    if (!xScale || !chartArea) return;
+    const x = xScale.getPixelForValue(idx);
+    if (x < chartArea.left || x > chartArea.right) return;
+
+    ctx.save();
+    ctx.strokeStyle = '#eab308';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+function setHoverCursorLine(dataIndex) {
+  if (!historyChart) return;
+  const plug = historyChart.options.plugins.hoverCursorLine || {};
+  const next = dataIndex != null && dataIndex >= 0 ? dataIndex : null;
+  if (plug.index === next) return;
+  historyChart.options.plugins.hoverCursorLine = { index: next };
+  historyChart.update('none');
 }
 
-function resetCycleDialHover() {
-  if (chartCycleCtx.hoverIndex == null) return;
-  chartCycleCtx.hoverIndex = null;
-  renderCycleDial(chartCycleCtx.latestStage);
+function applySelectedDay(dataIndex) {
+  const series = chartCycleCtx.series;
+  if (!series?.length || dataIndex == null || dataIndex < 0) return;
+  chartCycleCtx.selectedIndex = dataIndex;
+  setHoverCursorLine(dataIndex);
+  const stage = cycleStageForIndex(dataIndex);
+  if (dataIndex === series.length - 1) chartCycleCtx.latestStage = stage;
+  renderCycleDial(stage, {
+    asOf: series[dataIndex]?.date,
+  });
+}
+
+function syncCycleDialFromHover(dataIndex) {
+  // Ignore leave / empty hover — keep last selected day sticky.
+  if (dataIndex == null || dataIndex < 0) return;
+  if (dataIndex === chartCycleCtx.selectedIndex) return;
+  applySelectedDay(dataIndex);
 }
 
 function polarXY(cx, cy, r, angleDeg) {
@@ -761,8 +886,14 @@ function renderCycleDial(stage, opts = {}) {
     marker = `<circle class="marker dim" cx="${cx}" cy="${cy}" r="6" />`;
   }
 
-  const conf = cycleFitCaption(stage, opts.state ?? chartCycleCtx.state);
-  const asOf = opts.asOf ? ` · ${opts.asOf}` : '';
+  const asOf = opts.asOf || '';
+  const model = window.CycleModels && CycleModels.get(chartCycleCtx.modelId || selectedCycleModelId());
+  const L = model?.dialLabels || {
+    peak: 'Peak',
+    falling: 'Falling',
+    bottom: 'Bottom',
+    rising: 'Rising',
+  };
 
   el.innerHTML = `
     <div class="cycle-dial-wrap" title="Price cycle position (collected series)">
@@ -770,14 +901,14 @@ function renderCycleDial(stage, opts = {}) {
         <circle class="ring-track" cx="${cx}" cy="${cy}" r="${r}" />
         ${arcSvg}
         <circle class="hub" cx="${cx}" cy="${cy}" r="28" />
-        <text class="cycle-label label-peak" x="${peak.x.toFixed(1)}" y="${peak.y.toFixed(1)}" dy="0.35em">Peak</text>
-        <text class="cycle-label label-falling" x="${falling.x.toFixed(1)}" y="${falling.y.toFixed(1)}" dy="0.35em">Falling</text>
-        <text class="cycle-label label-bottom" x="${bottom.x.toFixed(1)}" y="${bottom.y.toFixed(1)}" dy="0.35em">Bottom</text>
-        <text class="cycle-label label-rising" x="${rising.x.toFixed(1)}" y="${rising.y.toFixed(1)}" dy="0.35em">Rising</text>
+        <text class="cycle-label label-peak" x="${peak.x.toFixed(1)}" y="${peak.y.toFixed(1)}" dy="0.35em">${L.peak}</text>
+        <text class="cycle-label label-falling" x="${falling.x.toFixed(1)}" y="${falling.y.toFixed(1)}" dy="0.35em">${L.falling}</text>
+        <text class="cycle-label label-bottom" x="${bottom.x.toFixed(1)}" y="${bottom.y.toFixed(1)}" dy="0.35em">${L.bottom}</text>
+        <text class="cycle-label label-rising" x="${rising.x.toFixed(1)}" y="${rising.y.toFixed(1)}" dy="0.35em">${L.rising}</text>
         ${marker}
       </svg>
     </div>
-    <p class="cycle-meta"><strong>${stage.label}</strong>${asOf}${conf}</p>
+    <p class="cycle-meta"><strong>${stage.label}</strong>${asOf ? ` · ${asOf}` : ''}</p>
   `;
 }
 
@@ -809,25 +940,273 @@ function destroyChart(chart) {
 function lineVisibility() {
   return {
     avg: document.getElementById('showAvg')?.checked !== false,
+    gmean: document.getElementById('showGmean')?.checked === true,
+    mode: document.getElementById('showMode')?.checked === true,
     med: document.getElementById('showMed')?.checked !== false,
     min: document.getElementById('showMin')?.checked !== false,
     max: document.getElementById('showMax')?.checked !== false,
   };
 }
 
-function yBoundsFromVisible(citySeries, vis) {
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.sqrt(a));
+}
+
+/** Align selected station live + session + published prices onto chart date labels. */
+function selectedStationChartOverlay(labels, fuel) {
+  if (selectedStationId == null || !labels?.length) return null;
+  const st = stationCache.get(selectedStationId);
+  if (!st) return null;
+  const fuelKey = fuel || document.getElementById('fuelSelect').value;
+  const byDate = new Map();
+
+  if (selectedPublishedHistory?.byDate) {
+    for (const [d, v] of selectedPublishedHistory.byDate) {
+      if (v != null && Number.isFinite(v)) byDate.set(d, v);
+    }
+  }
+  for (const snap of stationSnapshots[String(st.id)] || []) {
+    const v = snap.prices?.[fuelKey];
+    if (v != null && Number.isFinite(v) && snap.date) byDate.set(snap.date, v);
+  }
+  const live = stationFuelPrice(st, fuelKey);
+  if (live != null && Number.isFinite(live)) {
+    byDate.set(labels[labels.length - 1], live);
+  }
+  const data = labels.map((d) => (byDate.has(d) ? byDate.get(d) : null));
+  const n = data.filter((v) => v != null).length;
+  if (!n) return null;
+  const brand = (st.brand || '').trim();
+  const name = (st.name || '').trim();
+  let label = [brand, name].filter(Boolean).join(' ') || 'Station';
+  if (selectedPublishedHistory?.daysLoaded) {
+    label += ` (${selectedPublishedHistory.daysLoaded}d hist)`;
+  }
+  return { label, data, showLine: n >= 2, pointCount: n };
+}
+
+async function loadPublishedCatalog(state) {
+  if (!state) return null;
+  if (publishedStationCache.catalogs[state]) return publishedStationCache.catalogs[state];
+  try {
+    const cat = await fetchJson(`${baseUrl()}/v1/stations/${state}/catalog.json`);
+    publishedStationCache.catalogs[state] = cat;
+    return cat;
+  } catch (_) {
+    publishedStationCache.catalogs[state] = null;
+    return null;
+  }
+}
+
+async function loadPublishedDay(state, iso) {
+  const key = `${state}|${iso}`;
+  if (Object.prototype.hasOwnProperty.call(publishedStationCache.days, key)) {
+    return publishedStationCache.days[key];
+  }
+  try {
+    const day = await fetchJson(`${baseUrl()}/v1/stations/${state}/days/${iso}.json`);
+    publishedStationCache.days[key] = day;
+    return day;
+  } catch (_) {
+    publishedStationCache.days[key] = null;
+    return null;
+  }
+}
+
+function normMatchText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function fuelwatchIdFromParts(name, suburb) {
+  return `fuelwatch:WA:${normMatchText(name)}|${normMatchText(suburb)}`;
+}
+
+/** Match map/live pin to published catalog: GPS first, then WA name+suburb (+postcode). */
+function matchPublishedStationId(pmStation, catalog) {
+  if (!pmStation || !catalog?.stations) return null;
+
+  const lat = Number(pmStation.lat);
+  const lng = Number(pmStation.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    let bestId = null;
+    let bestKm = 0.08; // 80 m
+    for (const [id, meta] of Object.entries(catalog.stations)) {
+      if (meta?.lat == null || meta?.lng == null) continue;
+      const km = haversineKm(lat, lng, Number(meta.lat), Number(meta.lng));
+      if (km < bestKm) {
+        bestKm = km;
+        bestId = id;
+      }
+    }
+    if (bestId) return bestId;
+  }
+
+  // WA FuelWatch: retail archives + RSS share trading-name|suburb ids.
+  const name = pmStation.name || '';
+  const suburb = pmStation.suburb || '';
+  const pc =
+    pmStation.postcode != null && String(pmStation.postcode).trim() !== ''
+      ? Number(pmStation.postcode)
+      : null;
+
+  const directId = fuelwatchIdFromParts(name, suburb);
+  if (catalog.stations[directId]) return directId;
+
+  const nName = normMatchText(name);
+  const nSuburb = normMatchText(suburb);
+  let postcodeHit = null;
+  let suburbHit = null;
+
+  for (const [id, meta] of Object.entries(catalog.stations)) {
+    const mName = normMatchText(meta.name);
+    const mSuburb = normMatchText(meta.suburb);
+    const mPc = meta.postcode != null ? Number(meta.postcode) : null;
+
+    if (nName && mName === nName && nSuburb && mSuburb === nSuburb) return id;
+
+    if (Number.isFinite(pc) && mPc === pc && nName && mName === nName) {
+      postcodeHit = id;
+    }
+    if (nSuburb && mSuburb === nSuburb && nName && (mName.includes(nName) || nName.includes(mName))) {
+      suburbHit = id;
+    }
+  }
+  return postcodeHit || suburbHit || null;
+}
+
+function pricesFromPublishedDay(dayFile, stationId) {
+  if (!dayFile || !stationId) return null;
+  if (dayFile.stations && dayFile.stations[stationId]) return dayFile.stations[stationId];
+  for (const row of dayFile.s || []) {
+    if (Array.isArray(row) && row[0] === stationId) return row[1];
+  }
+  return null;
+}
+
+/**
+ * Load published tenths prices for a map station, convert to c/L for the chart fuel.
+ * @returns {Promise<{ state: string, publishedId: string, byDate: Map<string, number>, daysLoaded: number } | null>}
+ */
+async function loadPublishedHistoryForStation(st, labels, fuel) {
+  const state =
+    st.state ||
+    document.getElementById('stateSelect')?.value ||
+    chartCycleCtx.state;
+  if (!state || !labels?.length) return null;
+
+  const catalog = await loadPublishedCatalog(state);
+  if (!catalog) return null;
+  const publishedId = matchPublishedStationId(st, catalog);
+  if (!publishedId) return null;
+
+  const byDate = new Map();
+  const uniqueDates = [...new Set(labels.filter(Boolean))];
+  const concurrency = 8;
+  for (let i = 0; i < uniqueDates.length; i += concurrency) {
+    const chunk = uniqueDates.slice(i, i + concurrency);
+    const days = await Promise.all(chunk.map((iso) => loadPublishedDay(state, iso)));
+    days.forEach((day, j) => {
+      const prices = pricesFromPublishedDay(day, publishedId);
+      const tenths = prices?.[fuel];
+      if (tenths != null && Number.isFinite(tenths)) {
+        byDate.set(chunk[j], tenths / 10);
+      }
+    });
+  }
+
+  return {
+    state,
+    publishedId,
+    byDate,
+    daysLoaded: byDate.size,
+  };
+}
+
+function stationVsLatestBand(price, latest) {
+  if (price == null || !latest) return null;
+  const avg = latest.avg;
+  const min = latest.min;
+  const max = latest.max;
+  if (avg == null || min == null || max == null) return null;
+  if (price <= avg) {
+    const span = avg - min;
+    const pct = span > 1e-6 ? ((price - min) / span) * 100 : 0;
+    return {
+      side: 'below',
+      pct: Math.max(0, Math.min(100, pct)),
+      avg,
+      min,
+      max,
+    };
+  }
+  const span = max - avg;
+  const pct = span > 1e-6 ? ((max - price) / span) * 100 : 0;
+  return {
+    side: 'above',
+    pct: Math.max(0, Math.min(100, pct)),
+    avg,
+    min,
+    max,
+  };
+}
+
+function rankStationWithinKm(station, fuel, radiusKm = 25) {
+  if (!station?.lat || !station?.lng) return null;
+  const peers = [];
+  for (const st of stationCache.values()) {
+    if (!st.lat || !st.lng) continue;
+    const km = haversineKm(station.lat, station.lng, st.lat, st.lng);
+    if (km > radiusKm) continue;
+    const price = stationFuelPrice(st, fuel);
+    if (price == null || !Number.isFinite(price)) continue;
+    peers.push({ id: st.id, price, km });
+  }
+  if (!peers.length) return null;
+  peers.sort((a, b) => a.price - b.price || a.km - b.km);
+  const idx = peers.findIndex((p) => p.id === station.id);
+  if (idx < 0) return null;
+  return {
+    rank: idx + 1,
+    total: peers.length,
+    price: peers[idx].price,
+    cheapest: peers[0].price,
+    dearest: peers[peers.length - 1].price,
+    radiusKm,
+  };
+}
+
+function yBoundsFromVisible(citySeries, vis, extraSeries) {
   const vals = [];
   for (const p of citySeries) {
     if (vis.avg && p.avg != null) vals.push(p.avg);
+    if (vis.gmean && p.gmean != null) vals.push(p.gmean);
+    if (vis.mode && p.mode != null) vals.push(p.mode);
     if (vis.med && p.med != null) vals.push(p.med);
     if (vis.min && p.min != null) vals.push(p.min);
     if (vis.max && p.max != null) vals.push(p.max);
+  }
+  if (extraSeries) {
+    for (const series of extraSeries) {
+      if (!series) continue;
+      for (const v of series) {
+        if (v != null && Number.isFinite(v)) vals.push(v);
+      }
+    }
   }
   if (!vals.length) return undefined;
   const lo = Math.min(...vals);
   const hi = Math.max(...vals);
   const pad = Math.max(0.5, (hi - lo) * 0.08);
-  // Snap axis ends to 0.1c so tick labels stay clean tenths.
   return {
     min: Math.floor((lo - pad) * 10) / 10,
     max: Math.ceil((hi + pad) * 10) / 10,
@@ -839,12 +1218,19 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
   historyChart = destroyChart(historyChart);
 
   const avgData = citySeries.map((p) => p.avg);
+  const gmeanData = citySeries.map((p) => p.gmean);
+  const modeData = citySeries.map((p) => p.mode);
   const medData = citySeries.map((p) => p.med);
   const minData = citySeries.map((p) => p.min);
   const maxData = citySeries.map((p) => p.max);
   const vis = lineVisibility();
-  const yBounds = yBoundsFromVisible(citySeries, vis);
   const turns = marks?.turns || [];
+  const fftCurve = marks?.fftOverlay?.curve;
+  const stationOverlay = selectedStationChartOverlay(labels, fuel);
+  const extraForBounds = [];
+  if (fftCurve) extraForBounds.push(fftCurve);
+  if (stationOverlay) extraForBounds.push(stationOverlay.data);
+  const yBounds = yBoundsFromVisible(citySeries, vis, extraForBounds.length ? extraForBounds : null);
 
   const pointStyle = {
     pointRadius: 3,
@@ -860,7 +1246,34 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
       backgroundColor: 'rgba(61, 156, 245, 0.1)',
       fill: false,
       tension: 0.2,
+      spanGaps: true,
       hidden: !vis.avg,
+      ...pointStyle,
+    },
+    {
+      label: 'Geomean',
+      data: gmeanData,
+      borderColor: '#fbbf24',
+      backgroundColor: 'rgba(251, 191, 36, 0.12)',
+      borderDash: [6, 3],
+      borderWidth: 2,
+      fill: false,
+      tension: 0.2,
+      spanGaps: true,
+      hidden: !vis.gmean,
+      ...pointStyle,
+    },
+    {
+      label: 'Mode',
+      data: modeData,
+      borderColor: '#2dd4bf',
+      backgroundColor: 'rgba(45, 212, 191, 0.12)',
+      borderDash: [2, 2],
+      borderWidth: 2,
+      fill: false,
+      tension: 0.2,
+      spanGaps: true,
+      hidden: !vis.mode,
       ...pointStyle,
     },
     {
@@ -870,6 +1283,7 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
       backgroundColor: 'rgba(167, 139, 250, 0.1)',
       fill: false,
       tension: 0.2,
+      spanGaps: true,
       hidden: !vis.med,
       ...pointStyle,
     },
@@ -879,6 +1293,7 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
       borderColor: 'rgba(34, 197, 94, 0.75)',
       borderDash: [4, 4],
       tension: 0.2,
+      spanGaps: true,
       hidden: !vis.min,
       ...pointStyle,
     },
@@ -888,10 +1303,29 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
       borderColor: 'rgba(239, 68, 68, 0.75)',
       borderDash: [4, 4],
       tension: 0.2,
+      spanGaps: true,
       hidden: !vis.max,
       ...pointStyle,
     },
   ];
+
+  if (fftCurve) {
+    const periodLabel = marks.fftOverlay?.period
+      ? `FFT ~${marks.fftOverlay.period.toFixed(0)}d`
+      : 'FFT cycle';
+    datasets.push({
+      label: periodLabel,
+      data: fftCurve,
+      borderColor: '#2dd4bf',
+      borderDash: [6, 4],
+      borderWidth: 1.75,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      pointHitRadius: 8,
+      tension: 0.35,
+      fill: false,
+    });
+  }
 
   if (statePoint) {
     datasets.push({
@@ -906,21 +1340,41 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
     });
   }
 
+  if (stationOverlay) {
+    datasets.push({
+      label: stationOverlay.label,
+      data: stationOverlay.data,
+      borderColor: '#ef4444',
+      backgroundColor: '#ef4444',
+      borderWidth: 2,
+      tension: 0.2,
+      fill: false,
+      spanGaps: true,
+      showLine: stationOverlay.showLine,
+      pointRadius: (ctx) => (ctx.raw != null ? 5 : 0),
+      pointHoverRadius: 7,
+      pointHitRadius: 12,
+      pointBackgroundColor: '#ef4444',
+      pointBorderColor: '#fecaca',
+      pointBorderWidth: 1,
+    });
+  }
+
   historyChart = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets },
-    plugins: [cycleTurnLinesPlugin],
+    plugins: [cycleTurnLinesPlugin, hoverCursorLinePlugin],
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       onHover: (_event, active) => {
         if (active?.length) syncCycleDialFromHover(active[0].index);
-        else syncCycleDialFromHover(null);
       },
       plugins: {
         legend: { display: false },
         cycleTurnLines: { turns },
+        hoverCursorLine: { index: null },
         title: {
           display: true,
           text: title || `${FUEL_LABELS[fuel] || fuel} — c/L`,
@@ -928,6 +1382,7 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
           font: { size: 14 },
         },
         tooltip: {
+          position: 'mouseHeight',
           callbacks: {
             label: (tipCtx) => {
               const v = tipCtx.parsed.y;
@@ -951,29 +1406,35 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
       },
     },
   });
-
-  const wrap = ctx.closest('.chart-wrap') || ctx.parentElement;
-  if (wrap && !wrap._cycleLeaveBound) {
-    wrap.addEventListener('mouseleave', resetCycleDialHover);
-    wrap._cycleLeaveBound = true;
-  }
 }
 
 function applyLineVisibility() {
   if (!historyChart) return;
   const vis = lineVisibility();
-  const map = { Mean: vis.avg, Median: vis.med, 'Daily low': vis.min, 'Daily high': vis.max };
+  const map = {
+    Mean: vis.avg,
+    Geomean: vis.gmean,
+    Mode: vis.mode,
+    Median: vis.med,
+    'Daily low': vis.min,
+    'Daily high': vis.max,
+  };
   historyChart.data.datasets.forEach((ds) => {
     if (Object.prototype.hasOwnProperty.call(map, ds.label)) ds.hidden = !map[ds.label];
   });
   const byLabel = Object.fromEntries(historyChart.data.datasets.map((ds) => [ds.label, ds.data]));
   const series = (byLabel.Mean || []).map((avg, i) => ({
     avg,
+    gmean: byLabel.Geomean?.[i],
+    mode: byLabel.Mode?.[i],
     med: byLabel.Median?.[i],
     min: byLabel['Daily low']?.[i],
     max: byLabel['Daily high']?.[i],
   }));
-  const bounds = yBoundsFromVisible(series, vis);
+  const extras = historyChart.data.datasets
+    .filter((ds) => !Object.prototype.hasOwnProperty.call(map, ds.label))
+    .map((ds) => ds.data);
+  const bounds = yBoundsFromVisible(series, vis, extras.length ? extras : null);
   if (bounds) {
     historyChart.options.scales.y.min = bounds.min;
     historyChart.options.scales.y.max = bounds.max;
@@ -992,6 +1453,8 @@ function renderSummaryCards(stats, periodDays) {
   }
   el.innerHTML = `
     <div class="summary-row"><span class="label">Latest mean</span><span class="value">${stats.latest.avg.toFixed(1)}c</span></div>
+    <div class="summary-row"><span class="label">Latest geomean</span><span class="value">${stats.latest.gmean != null ? `${stats.latest.gmean.toFixed(1)}c` : '—'}</span></div>
+    <div class="summary-row"><span class="label">Latest mode</span><span class="value">${stats.latest.mode != null ? `${stats.latest.mode.toFixed(1)}c` : '—'}</span></div>
     <div class="summary-row"><span class="label">Latest median</span><span class="value">${stats.latest.med != null ? `${stats.latest.med.toFixed(1)}c` : '—'}</span></div>
     <div class="summary-row"><span class="label">Current low / high</span><span class="value">${stats.currentLow?.toFixed(1) ?? '—'} – ${stats.currentHigh?.toFixed(1) ?? '—'}c</span></div>
     <div class="summary-row"><span class="label">Period low / high (${periodDays}d)</span><span class="value">${stats.periodLow?.toFixed(1) ?? '—'} – ${stats.periodHigh?.toFixed(1) ?? '—'}c</span></div>
@@ -1041,43 +1504,81 @@ async function fetchPetrolmateSummary(state) {
 async function refreshCharts() {
   const state = document.getElementById('stateSelect').value;
   const fuel = document.getElementById('fuelSelect').value;
-  const scope = selectedScope();
   const periodDays = selectedPeriod();
+
+  // Always re-fetch the active state file so publishes show up without a full reload.
+  try {
+    const index = await fetchJson(`${baseUrl()}/v1/index.json`);
+    const entry = index.states?.find((s) => s.code === state);
+    const fileName = entry?.file || `${state}.json`;
+    stateFiles[state] = await fetchJson(`${baseUrl()}/v1/${fileName}`);
+  } catch (err) {
+    console.warn('State refresh failed, using cached file:', err.message);
+  }
+
   const file = stateFiles[state];
   if (!file) return;
 
+  syncScopeOptions(file, fuel);
+  const scope = selectedScope();
+
   const archive = await loadArchivesForState(state);
-  const fullSeries = buildMergedSeries(file, archive, fuel);
+  const fullSeries = buildMergedSeries(file, archive, fuel, scope);
   const series = sliceSeriesByPeriod(fullSeries, periodDays);
   const stats = seriesStats(series);
   const params = file.params?.[fuel];
-  const marks = findChartCycleMarks(series, state);
-  const cityStage = marks.turns.length
-    ? inferCycleStageFromTurns(series.length - 1, marks.turns, series, params, state)
-    : inferCycleStage(series, params);
+  const marks = findChartCycleMarks(fullSeries, series, state);
+  const modelId = marks.modelId || effectiveCycleModelId(state);
+  const prevDate =
+    chartCycleCtx.selectedIndex != null
+      ? chartCycleCtx.series?.[chartCycleCtx.selectedIndex]?.date
+      : null;
+  let selectedIndex = series.length ? series.length - 1 : null;
+  if (prevDate && series.length) {
+    const kept = series.findIndex((p) => p?.date === prevDate);
+    if (kept >= 0) selectedIndex = kept;
+  }
   chartCycleCtx = {
     series,
+    fullSeries,
     params,
     turns: marks.turns,
+    fftOverlay: marks.fftOverlay || null,
+    statePoint: null,
     state,
-    latestStage: cityStage,
-    hoverIndex: null,
+    modelId,
+    latestStage: null,
+    selectedIndex,
   };
+  chartCycleCtx.latestStage = series.length
+    ? cycleStageForIndex(series.length - 1)
+    : null;
 
-  const dataGran = file.granularity || 'state';
   const place = scopeLabel(state, scope);
   const chartTitleText = `${place} — ${FUEL_LABELS[fuel] || fuel}`;
   document.getElementById('chartTitle').textContent = chartTitleText;
 
+  const turnParams = window.CycleModels?.resolveTurnDetectParams?.(state);
+  const turnTune = window.CycleModels?.getTurnTune?.();
+  const fftOverlay = marks.fftOverlay;
+  const latestN = stats?.latest?.n;
   let hint =
-    `Collected series is ${dataGran === 'metro' ? 'metro' : 'state-wide'} means. ` +
-    `Showing last ${periodDays} days. Points are daily mean / median / low / high. ` +
-    `Dotted: red = peak, green = bottom.`;
-  if (scope !== dataGran) {
+    `Showing ${scopeLabel(state, scope)} series` +
+    (latestN != null ? ` (n=${latestN})` : '') +
+    `. Last ${periodDays} days. Points are daily mean / geomean / median / low / high. ` +
+    `Dotted: red = peak, green = bottom`;
+  if (turnTune) {
     hint +=
-      scope === 'metro'
-        ? ' · Scope set to metro; published file is state-wide (no separate metro series yet).'
-        : ' · Scope set to whole state; published file is metro (state-wide history not stored).';
+      ` (sens ${turnTune.sensitivity}, gap ${turnParams?.minGap ?? turnTune.minGapDays}d, coarse ${turnTune.coarseness}, FFT ${turnTune.fftAssist ?? 0}`;
+    if (fftOverlay?.period) {
+      hint += ` → teal ~${fftOverlay.period.toFixed(0)}d curve`;
+    }
+    hint += ').';
+  } else {
+    hint += '.';
+  }
+  if (!file.scopes) {
+    hint += ' · Legacy single-series file (metro/regional/state not split yet).';
   }
   document.getElementById('seriesHint').textContent = hint;
 
@@ -1094,6 +1595,7 @@ async function refreshCharts() {
         ' · Live state overlay unavailable (use node viewer/serve.mjs).';
     }
   }
+  chartCycleCtx.statePoint = statePoint;
 
   renderHistoryChart(
     series.map((p) => p.date),
@@ -1105,8 +1607,12 @@ async function refreshCharts() {
     marks
   );
   renderSummaryCards(stats, periodDays);
-  renderCycleDial(cityStage);
+  if (selectedIndex != null) applySelectedDay(selectedIndex);
+  else renderCycleDial(chartCycleCtx.latestStage);
+  syncArcpathTuneVisibility();
+  syncWaWeeklyAfterLastVisibility();
   renderE10Box(file);
+  requestAnimationFrame(() => syncChartHeightToSummary());
 }
 
 async function loadAllStates() {
@@ -1149,6 +1655,8 @@ function initMap() {
 
   map.on('moveend zoomend', () => {
     updateMapZoomHint();
+    redrawStationMarkers();
+    rebuildStationList();
     scheduleStationFetch();
   });
 
@@ -1208,6 +1716,13 @@ function stationFuelPrice(station, fuel) {
   return row?.price ?? null;
 }
 
+/** Green (cheap) → red (dear) for t in [0, 1]. */
+function priceHeatColor(t) {
+  const x = Math.max(0, Math.min(1, t));
+  const hue = 120 * (1 - x);
+  return `hsl(${hue}, 72%, 42%)`;
+}
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -1216,19 +1731,28 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-function stationMarkerIcon(station, fuel, loaded) {
+function stationMarkerIcon(station, fuel, loaded, extent) {
   const price = stationFuelPrice(station, fuel);
   const priceLabel = price != null ? `${price.toFixed(1)}c` : '—';
   const logo = window.brandLogoFor(station.brand);
-  const effectiveLoaded = loaded && !stationFetchInFlight;
-  const state = effectiveLoaded ? 'loaded' : 'pending';
+  const showLoaded = loaded && price != null;
+  const isCheapest = showLoaded && extent && price === extent.min;
+  const state = showLoaded ? 'loaded' : 'pending';
+  const cheapest = isCheapest ? ' cheapest' : '';
   const active = selectedStationId === station.id ? ' active' : '';
-  const showPrice = effectiveLoaded && price != null;
+  const showPrice = showLoaded;
+
+  let heatStyle = '';
+  if (showLoaded && extent && !isCheapest) {
+    const t = extent.max === extent.min ? 0 : (price - extent.min) / (extent.max - extent.min);
+    const color = priceHeatColor(t);
+    heatStyle = ` style="--pin-heat:${color}"`;
+  }
 
   return L.divIcon({
     className: 'station-div-icon',
     html: `
-      <div class="station-marker ${state}${active}" data-id="${station.id}">
+      <div class="station-marker ${state}${cheapest}${active}" data-id="${station.id}"${heatStyle}>
         ${showPrice ? `<span class="marker-price">${escapeHtml(priceLabel)}</span>` : ''}
         <div class="marker-pin-wrap">
           <div class="marker-pin-head">
@@ -1291,22 +1815,39 @@ function rebuildStationList() {
 }
 
 function redrawStationMarkers() {
-  if (!markerLayer) return;
+  if (!markerLayer || !map) return;
   markerLayer.clearLayers();
   markerById.clear();
 
   const fuel = document.getElementById('fuelSelect').value;
   const bounds = map.getBounds();
-  let count = 0;
-
+  const visible = [];
   for (const st of stationCache.values()) {
     if (!st.lat || !st.lng || !bounds.contains([st.lat, st.lng])) continue;
-    if (count >= MAX_STATIONS_PER_REQUEST * 2) break;
-    count++;
+    visible.push(st);
+    if (visible.length >= MAX_STATIONS_PER_REQUEST * 2) break;
+  }
 
+  let min = Infinity;
+  let max = -Infinity;
+  for (const st of visible) {
+    if (!st.loaded) continue;
+    const price = stationFuelPrice(st, fuel);
+    if (price == null || !Number.isFinite(price)) continue;
+    if (price < min) min = price;
+    if (price > max) max = price;
+  }
+  const extent =
+    Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
+
+  for (const st of visible) {
+    const price = stationFuelPrice(st, fuel);
+    const isCheapest =
+      st.loaded && extent && price != null && price === extent.min;
     const marker = L.marker([st.lat, st.lng], {
-      icon: stationMarkerIcon(st, fuel, st.loaded),
-      zIndexOffset: st.id === selectedStationId ? 1000 : 0,
+      icon: stationMarkerIcon(st, fuel, st.loaded, extent),
+      zIndexOffset:
+        st.id === selectedStationId ? 1000 : isCheapest ? 500 : 0,
     });
 
     marker.on('click', (e) => {
@@ -1382,12 +1923,41 @@ function petrolmateFuelToCanon(type) {
   return m[type] || type;
 }
 
-function selectStationById(id) {
+async function selectStationById(id) {
   const st = stationCache.get(id);
   if (!st) return;
   selectedStationId = id;
+  selectedPublishedHistory = null;
   redrawStationMarkers();
   rebuildStationList();
+  renderSelectedStationDetail(st);
+  renderStationChart(String(st.id));
+
+  const labels = chartCycleCtx.series?.map((p) => p.date) || [];
+  const fuel = document.getElementById('fuelSelect').value;
+  try {
+    selectedPublishedHistory = await loadPublishedHistoryForStation(st, labels, fuel);
+  } catch (err) {
+    console.warn('Published station history:', err.message);
+    selectedPublishedHistory = null;
+  }
+
+  if (selectedPublishedHistory?.daysLoaded) {
+    const detail = document.getElementById('stationDetail');
+    if (detail) {
+      detail.innerHTML +=
+        `<p class="hint">Published history: ${selectedPublishedHistory.daysLoaded} day(s) matched in catalog.</p>`;
+    }
+  }
+
+  refreshHistoryWithStationOverlay();
+  renderStationChart(String(st.id));
+}
+
+function renderSelectedStationDetail(st) {
+  const fuel = document.getElementById('fuelSelect').value;
+  const scope = selectedScope();
+  const place = scope === 'metro' ? 'metro' : 'state';
 
   const lines = [
     `<strong>${escapeHtml(st.brand || '')} ${escapeHtml(st.name || '')}</strong>`,
@@ -1417,12 +1987,47 @@ function selectStationById(id) {
 
   const key = String(st.id);
   if (!stationSnapshots[key]) stationSnapshots[key] = [];
-  stationSnapshots[key].push({
-    date: new Date().toISOString().slice(0, 10),
-    prices: { ...priceMap },
-  });
+  const today = new Date().toISOString().slice(0, 10);
+  const lastSnap = stationSnapshots[key][stationSnapshots[key].length - 1];
+  if (!lastSnap || lastSnap.date !== today || JSON.stringify(lastSnap.prices) !== JSON.stringify(priceMap)) {
+    stationSnapshots[key].push({
+      date: today,
+      prices: { ...priceMap },
+    });
+  }
 
-  const fuel = document.getElementById('fuelSelect').value;
+  const price = priceMap[fuel] ?? stationFuelPrice(st, fuel);
+  const latest = chartCycleCtx.series?.[chartCycleCtx.series.length - 1];
+  const band = stationVsLatestBand(price, latest);
+  if (band && price != null) {
+    if (band.side === 'below') {
+      lines.push(
+        `<p><strong>Vs ${place} average:</strong> below mean — ` +
+          `${band.pct.toFixed(0)}th percentile from daily low ` +
+          `(low ${band.min.toFixed(1)} → mean ${band.avg.toFixed(1)}c)</p>`
+      );
+    } else {
+      lines.push(
+        `<p><strong>Vs ${place} average:</strong> above mean — ` +
+          `${band.pct.toFixed(0)}th percentile from daily high ` +
+          `(mean ${band.avg.toFixed(1)} → high ${band.max.toFixed(1)}c)</p>`
+      );
+    }
+  } else if (price != null) {
+    lines.push(`<p class="hint">Load chart data to compare against the ${place} daily range.</p>`);
+  }
+
+  const nearby = rankStationWithinKm(st, fuel, 25);
+  if (nearby) {
+    lines.push(
+      `<p><strong>Within ${nearby.radiusKm}&nbsp;km:</strong> ` +
+        `#${nearby.rank} of ${nearby.total} for ${escapeHtml(FUEL_LABELS[fuel] || fuel)} ` +
+        `(${nearby.cheapest.toFixed(1)}–${nearby.dearest.toFixed(1)}c)</p>`
+    );
+  } else if (price != null) {
+    lines.push('<p class="hint">No nearby station prices loaded yet for a 25&nbsp;km ranking.</p>');
+  }
+
   const stage = inferCycleStage(
     stationSnapshots[key]
       .map((snap) => ({
@@ -1436,7 +2041,38 @@ function selectStationById(id) {
   lines.push(`<p>Cycle stage (session): <span class="badge ${stage.stage}">${stage.label}</span></p>`);
 
   document.getElementById('stationDetail').innerHTML = lines.join('');
-  renderStationChart(key);
+}
+
+/** Re-draw history chart station layer without a full data reload when possible. */
+function refreshHistoryWithStationOverlay() {
+  if (!chartCycleCtx.series?.length) return;
+  const state = document.getElementById('stateSelect').value;
+  const fuel = document.getElementById('fuelSelect').value;
+  const series = chartCycleCtx.series;
+  const marks = {
+    turns: chartCycleCtx.turns,
+    modelId: chartCycleCtx.modelId,
+    fftOverlay: chartCycleCtx.fftOverlay || null,
+  };
+  const place = scopeLabel(state, selectedScope());
+  const chartTitleText = `${place} — ${FUEL_LABELS[fuel] || fuel}`;
+  const selectedDate =
+    chartCycleCtx.selectedIndex != null ? series[chartCycleCtx.selectedIndex]?.date : null;
+  renderHistoryChart(
+    series.map((p) => p.date),
+    series,
+    chartCycleCtx.statePoint || null,
+    fuel,
+    `${chartTitleText} (c/L)`,
+    state,
+    marks
+  );
+  if (selectedDate) {
+    const idx = series.findIndex((p) => p?.date === selectedDate);
+    if (idx >= 0) applySelectedDay(idx);
+  } else if (chartCycleCtx.latestStage) {
+    renderCycleDial(chartCycleCtx.latestStage);
+  }
 }
 
 function goToCapital() {
@@ -1457,15 +2093,32 @@ function renderStationChart(stationKey) {
   const ctx = document.getElementById('stationChart');
   stationChart = destroyChart(stationChart);
 
-  const points = snaps
-    .map((s) => ({ date: s.date, v: s.prices[fuel] }))
-    .filter((p) => p.v != null);
+  const byDate = new Map();
+  if (selectedPublishedHistory?.byDate) {
+    for (const [d, v] of selectedPublishedHistory.byDate) {
+      if (v != null) byDate.set(d, v);
+    }
+  }
+  for (const s of snaps) {
+    const v = s.prices?.[fuel];
+    if (v != null && s.date) byDate.set(s.date, v);
+  }
+
+  const points = [...byDate.entries()]
+    .map(([date, v]) => ({ date, v }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   if (points.length < 2) {
-    hint.textContent = 'Need 2+ snapshots in this session for a station trend line.';
+    hint.textContent = selectedPublishedHistory
+      ? 'Matched a published station but need 2+ priced days for a trend line.'
+      : 'Need 2+ published or session prices for a station trend line.';
     return;
   }
-  hint.textContent = `${points.length} snapshot(s) in this browser session.`;
+  const histN = selectedPublishedHistory?.daysLoaded || 0;
+  hint.textContent =
+    histN > 0
+      ? `${points.length} day(s) (${histN} from published history).`
+      : `${points.length} snapshot(s) in this browser session.`;
 
   stationChart = new Chart(ctx, {
     type: 'line',
@@ -1475,8 +2128,9 @@ function renderStationChart(stationKey) {
         {
           label: fuel,
           data: points.map((p) => p.v),
-          borderColor: '#a78bfa',
+          borderColor: '#ef4444',
           tension: 0.2,
+          pointRadius: 3,
         },
       ],
     },
@@ -1498,17 +2152,47 @@ function initCapitalSelect() {
     .join('');
 }
 
+function syncScopeOptions(file, fuel) {
+  const sel = document.getElementById('scopeSelect');
+  if (!sel || !file) return;
+  const labels = {
+    metro: 'Metro',
+    regional: 'Regional',
+    state: 'Whole state',
+  };
+  let current = sel.value;
+  for (const opt of sel.options) {
+    const sc = opt.value;
+    const ok = scopeIsAvailable(file, fuel, sc);
+    opt.disabled = !ok;
+    const n = latestScopeN(file, fuel, sc);
+    opt.textContent =
+      labels[sc] + (n != null ? ` (n≈${n})` : ok ? '' : ' — no data');
+  }
+  if (!scopeIsAvailable(file, fuel, current)) {
+    current = preferredScope(file, fuel);
+    sel.value = current;
+  }
+}
+
 function syncScopeDefaultFromFile() {
   const state = document.getElementById('stateSelect').value;
+  const fuel = document.getElementById('fuelSelect').value;
   const file = stateFiles[state];
   if (!file) return;
+  syncScopeOptions(file, fuel);
   const sel = document.getElementById('scopeSelect');
-  if (sel && file.granularity) sel.value = file.granularity === 'metro' ? 'metro' : 'state';
+  if (sel) sel.value = preferredScope(file, fuel);
 }
 
 function init() {
   initCapitalSelect();
   initMap();
+  populateCycleModelSelect();
+  initTurnTuneControls();
+  initWaWeeklyAfterLastControl();
+  initArcpathTuneControls();
+  initTuneFoldHeightSync();
 
   const refresh = () => refreshCharts().catch((e) => setStatus(`Error: ${e.message}`));
 
@@ -1516,17 +2200,38 @@ function init() {
     loadAllStates().catch((e) => setStatus(`Error: ${e.message}`));
   document.getElementById('stateSelect').onchange = () => {
     syncScopeDefaultFromFile();
+    syncWaWeeklyAfterLastVisibility();
     refresh();
   };
   document.getElementById('scopeSelect').onchange = refresh;
   document.getElementById('periodSelect').onchange = refresh;
+  document.getElementById('cycleModelSelect').onchange = () => {
+    const id = document.getElementById('cycleModelSelect').value;
+    try {
+      localStorage.setItem(CycleModels.STORAGE_KEY, id);
+    } catch (_) {
+      /* ignore */
+    }
+    syncArcpathTuneVisibility();
+    refresh();
+  };
   document.getElementById('fuelSelect').onchange = () => {
+    const state = document.getElementById('stateSelect').value;
+    const fuel = document.getElementById('fuelSelect').value;
+    const file = stateFiles[state];
+    if (file) syncScopeOptions(file, fuel);
     refresh();
     redrawStationMarkers();
     rebuildStationList();
+    if (selectedStationId != null) {
+      const st = stationCache.get(selectedStationId);
+      if (st) selectStationById(st.id);
+    }
   };
   document.getElementById('overlaySummary').onchange = refresh;
   document.getElementById('showAvg').onchange = () => applyLineVisibility();
+  document.getElementById('showGmean').onchange = () => applyLineVisibility();
+  document.getElementById('showMode').onchange = () => applyLineVisibility();
   document.getElementById('showMed').onchange = () => applyLineVisibility();
   document.getElementById('showMin').onchange = () => applyLineVisibility();
   document.getElementById('showMax').onchange = () => applyLineVisibility();
@@ -1535,10 +2240,13 @@ function init() {
 
   window.addEventListener('resize', () => {
     syncMapToFuelGraphWidth();
+    syncChartHeightToSummary();
   });
   watchMapSize();
+  watchSummaryChartHeight();
   requestAnimationFrame(() => {
     syncMapToFuelGraphWidth();
+    syncChartHeightToSummary();
   });
 }
 

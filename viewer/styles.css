@@ -58,7 +58,8 @@ h3 { margin: 0 0 0.5rem; font-size: 0.95rem; color: var(--muted); }
   min-width: 8rem;
 }
 .controls .checkbox,
-.line-toggles .checkbox {
+.line-toggles .checkbox,
+.chart-toolbar-controls > label.checkbox {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
@@ -97,6 +98,7 @@ button:hover { filter: brightness(1.08); }
 }
 
 .panel-chart { min-width: 0; }
+.panel-summary { min-width: 0; }
 .chart-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -116,6 +118,65 @@ button:hover { filter: brightness(1.08); }
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 0.85rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.tune-fold {
+  margin: 0.5rem 0 0.65rem;
+  padding: 0.35rem 0 0;
+  border-top: 1px solid var(--border);
+}
+.tune-fold > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  user-select: none;
+  padding: 0.25rem 0;
+}
+.tune-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.tune-fold > summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+.tune-fold[open] > summary::before {
+  transform: rotate(90deg);
+}
+.tune-fold > summary:hover {
+  color: var(--text);
+}
+
+.turn-detect-tune {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.35rem 1rem;
+  align-items: center;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  border-top: none;
+}
+.turn-detect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  grid-column: 1 / -1;
+}
+.turn-detect-tune .btn-secondary {
+  justify-self: start;
+}
+.turn-detect-actions .checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
   font-size: 0.8rem;
   color: var(--muted);
 }
@@ -215,6 +276,51 @@ button:hover { filter: brightness(1.08); }
 .cycle-meta strong {
   color: var(--text);
   font-weight: 600;
+}
+.arcpath-tune {
+  margin-top: 1rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+  width: 100%;
+}
+.arcpath-tune-body {
+  margin-top: 0.45rem;
+}
+.tune-row {
+  display: grid;
+  grid-template-columns: minmax(6.5rem, 38%) 1fr 2.75rem;
+  gap: 0.45rem 0.6rem;
+  align-items: center;
+  margin-bottom: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.tune-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.tune-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+}
+.tune-hint {
+  margin: 0.35rem 0 0.65rem;
+  font-size: 0.75rem;
+}
+.btn-secondary {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.7rem;
+}
+.btn-secondary:hover {
+  color: var(--text);
+  border-color: var(--muted);
+  filter: none;
 }
 .badge {
   display: inline-flex;
@@ -357,6 +463,11 @@ button:hover { filter: brightness(1.08); }
   margin: 0 auto 3px;
   border: 1px solid var(--border);
 }
+.station-marker.cheapest .marker-price {
+  background: #e8c547;
+  color: #111;
+  border-color: #c9a227;
+}
 .marker-pin-wrap { display: flex; flex-direction: column; align-items: center; }
 .marker-pin-head {
   width: 30px;
@@ -370,8 +481,10 @@ button:hover { filter: brightness(1.08); }
   overflow: hidden;
   background: #3d9cf5;
 }
-.station-marker.loaded .marker-pin-head { background: #22c55e; }
 .station-marker.pending .marker-pin-head { background: #3d9cf5; }
+.station-marker.loaded .marker-pin-head {
+  background: var(--pin-heat, #22c55e);
+}
 .marker-pin-head img {
   width: 22px;
   height: 22px;
@@ -385,10 +498,24 @@ button:hover { filter: brightness(1.08); }
   margin-top: -2px;
 }
 .station-marker.pending .marker-pin-tail { border-top: 10px solid #3d9cf5; }
-.station-marker.loaded .marker-pin-tail { border-top: 10px solid #22c55e; }
+.station-marker.loaded .marker-pin-tail {
+  border-top: 10px solid var(--pin-heat, #22c55e);
+}
+.station-marker.cheapest .marker-pin-head {
+  background: #e8c547;
+  border-color: #fff8dc;
+  box-shadow: 0 0 0 2px #e8c547, 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.station-marker.cheapest .marker-pin-tail {
+  border-top: 10px solid #e8c547;
+}
 .station-marker.active .marker-pin-head {
   border-color: #f59e0b;
   box-shadow: 0 0 0 2px #f59e0b;
+}
+.station-marker.cheapest.active .marker-pin-head {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #e8c547, 0 0 0 4px #f59e0b;
 }
 
 footer {

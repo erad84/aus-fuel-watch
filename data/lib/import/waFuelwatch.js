@@ -100,29 +100,42 @@ function ingestWaCsv(filePath, startIso, endIso, stationsByDay) {
 
     const name = row.TRADING_NAME || row.TradingName || row.trading_name || row.Station || '';
     const suburb = row.LOCATION || row.Location || row.SUBURB || row.Suburb || '';
+    const postcodeRaw = row.POSTCODE || row.Postcode || row.postcode;
+    const postcode = postcodeRaw != null && String(postcodeRaw).trim() !== ''
+      ? Number(postcodeRaw)
+      : null;
     const lat = Number(row.LATITUDE || row.Latitude || row.latitude);
     const lng = Number(row.LONGITUDE || row.Longitude || row.longitude);
-    const inMetro = (row.REGION_DESCRIPTION || '').trim() === 'Metro';
+    // Prefer explicit Metro region; also treat Perth / Greater Perth style labels as metro.
+    const region = String(row.REGION_DESCRIPTION || row.Region || '').trim();
+    const inMetro =
+      /^metro$/i.test(region) ||
+      /perth/i.test(region) ||
+      /greater perth/i.test(String(row.AREA_DESCRIPTION || ''));
 
     if (!stationsByDay.has(iso)) stationsByDay.set(iso, []);
     const list = stationsByDay.get(iso);
-    const key = `${name}|${suburb}`.toLowerCase();
-    let st = list.find((x) => x._key === key);
+    // Same id as live FuelWatch RSS (trading name + suburb).
+    const id = fuelwatch.stationId(name, suburb);
+    let st = list.find((x) => x.id === id || x._key === id);
     if (!st) {
       st = {
+        id,
         state: 'WA',
         name,
         brand: row.BRAND_DESCRIPTION || row.BRAND || row.Brand || '',
         address: row.ADDRESS || row.Address || suburb,
         suburb,
-        postcode: row.POSTCODE ? Number(row.POSTCODE) : null,
+        postcode: Number.isFinite(postcode) ? postcode : null,
         lat: Number.isFinite(lat) ? lat : null,
         lng: Number.isFinite(lng) ? lng : null,
         metro: inMetro,
         prices: {},
-        _key: key,
+        _key: id,
       };
       list.push(st);
+    } else if (st.postcode == null && Number.isFinite(postcode)) {
+      st.postcode = postcode;
     }
     st.prices[fuel] = Math.round(price * 10);
   });
@@ -191,7 +204,7 @@ async function importWa(cacheDir, days) {
   const { csv, zips } = ingestWaCacheDir(cacheDir, startIso, endIso, stationsByDay);
 
   const byState = readingsByStateAndDay(stationsByDay, { preferMetro: true });
-  return { byState, waCsv: csv, waZips: zips };
+  return { byState, stationsByDay, waCsv: csv, waZips: zips };
 }
 
 module.exports = { ATTRIBUTION, importWa, dayRange };

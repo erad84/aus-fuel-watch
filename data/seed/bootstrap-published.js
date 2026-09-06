@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const history = require('../lib/history');
+const stationHistory = require('../lib/stationHistory');
 const { FUELS } = require('../lib/fuels');
 const { STATES } = require('../lib/states');
 
@@ -20,6 +21,8 @@ if (fs.existsSync(archiveDir)) {
     if (name.endsWith('.json')) fs.unlinkSync(path.join(archiveDir, name));
   }
 }
+
+stationHistory.clearAll(DOCS_DIR);
 
 for (const state of STATES) {
   const file = history.emptyState(state);
@@ -42,6 +45,11 @@ const index = {
   units: 'tenths of a cent per litre',
   fuels: FUELS,
   states: STATES.map((s) => ({ code: s, file: `${s}.json` })),
+  stations: {
+    index: 'stations/index.json',
+    note: 'Per-station daily prices (not downloaded by the watch)',
+  },
 };
 fs.writeFileSync(indexPath, JSON.stringify(index, null, 1) + '\n');
+stationHistory.writeIndex(DOCS_DIR, STATES);
 console.log(`reset index → ${DOCS_DIR}`);

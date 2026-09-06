@@ -26,8 +26,9 @@
     <label>
       Scope
       <select id="scopeSelect">
-        <option value="metro">Metro</option>
-        <option value="state">Whole state</option>
+            <option value="metro">Metro</option>
+            <option value="regional">Regional</option>
+            <option value="state">Whole state</option>
       </select>
     </label>
     <label>
@@ -66,21 +67,95 @@
               <option value="90" selected>90 days</option>
             </select>
           </label>
+          <label>
+            Cycle model
+            <select id="cycleModelSelect"></select>
+          </label>
           <div class="line-toggles" role="group" aria-label="Visible series">
             <label class="checkbox"><input id="showAvg" type="checkbox" checked /> Mean</label>
-            <label class="checkbox"><input id="showMed" type="checkbox" checked /> Median</label>
-            <label class="checkbox"><input id="showMin" type="checkbox" checked /> Daily low</label>
-            <label class="checkbox"><input id="showMax" type="checkbox" checked /> Daily high</label>
+            <label class="checkbox"><input id="showGmean" type="checkbox" /> Geomean</label>
+            <label class="checkbox"><input id="showMode" type="checkbox" /> Mode</label>
+            <label class="checkbox"><input id="showMed" type="checkbox" /> Median</label>
+            <label class="checkbox"><input id="showMin" type="checkbox" /> Daily low</label>
+            <label class="checkbox"><input id="showMax" type="checkbox" /> Daily high</label>
           </div>
         </div>
       </div>
+      <details class="tune-fold" id="turnDetectFold">
+        <summary>Turn detection</summary>
+        <div id="turnDetectTune" class="turn-detect-tune">
+          <label class="tune-row" title="Higher = more peak/bottom lines (smaller price swing required)">
+            <span>Sensitivity</span>
+            <input id="tuneTurnSensitivity" type="range" min="0" max="100" step="1" />
+            <span class="tune-val" id="tuneTurnSensitivityVal">85</span>
+          </label>
+          <label class="tune-row" title="Minimum days between same-type turns before merge">
+            <span>Min gap</span>
+            <input id="tuneTurnMinGap" type="range" min="3" max="21" step="1" />
+            <span class="tune-val" id="tuneTurnMinGapVal">5d</span>
+          </label>
+          <label class="tune-row" title="Higher = fewer lines (scales swing threshold and gap together)">
+            <span>Coarseness</span>
+            <input id="tuneTurnCoarseness" type="range" min="1" max="100" step="1" />
+            <span class="tune-val" id="tuneTurnCoarsenessVal">25</span>
+          </label>
+          <label class="tune-row" title="How much FFT dominant period/phase guides peak/bottom lines (0 = zigzag only)">
+            <span>FFT assist</span>
+            <input id="tuneTurnFft" type="range" min="0" max="100" step="1" />
+            <span class="tune-val" id="tuneTurnFftVal">0</span>
+          </label>
+          <div class="turn-detect-actions">
+            <button id="tuneTurnReset" type="button" class="btn-secondary">Reset turns</button>
+            <label
+              id="waWeeklyAfterLastLabel"
+              class="checkbox hidden"
+              title="WA FuelWatch weekly clock after the last peak/bottom (2d rise / 5d fall). Off = use the selected model's normal after-last logic."
+            >
+              <input id="waWeeklyAfterLast" type="checkbox" />
+              WA weekly after last
+            </label>
+          </div>
+        </div>
+      </details>
       <p class="hint" id="seriesHint"></p>
       <div class="chart-wrap"><canvas id="historyChart"></canvas></div>
     </div>
-    <div class="panel">
+    <div class="panel panel-summary">
       <h2>Summary</h2>
       <div id="summaryCards" class="cards"></div>
       <div id="cycleStages" class="cycle-stages"></div>
+      <details id="arcpathTune" class="tune-fold arcpath-tune hidden">
+        <summary>Dial adjustments</summary>
+        <div class="arcpath-tune-body">
+          <label class="tune-row" title="Minimum path share in the blend (rest is arc / price level)">
+            <span>Path base</span>
+            <input id="tunePathBase" type="range" min="0" max="50" step="1" />
+            <span class="tune-val" id="tunePathBaseVal">8%</span>
+          </label>
+          <label class="tune-row" title="Extra path weight added when the move is steep (0 = arc only)">
+            <span>Path on steep</span>
+            <input id="tunePathScale" type="range" min="0" max="80" step="1" />
+            <span class="tune-val" id="tunePathScaleVal">32%</span>
+          </label>
+          <label class="tune-row" title="Share of each price leg mapped into Peak or Bottom stage bands (visual ring unchanged)">
+            <span>Peak/bottom width</span>
+            <input id="tuneExtremeEdge" type="range" min="15" max="49" step="1" />
+            <span class="tune-val" id="tuneExtremeEdgeVal">30%</span>
+          </label>
+          <label class="tune-row" title="How much the prior peak/bottom price level pulls the dial (0 = ignore previous max/min)">
+            <span>Prior extreme</span>
+            <input id="tunePriorExtreme" type="range" min="0" max="80" step="1" />
+            <span class="tune-val" id="tunePriorExtremeVal">25%</span>
+          </label>
+          <label class="tune-row" title="How much FFT cycle phase pulls the dial (independent of FFT assist on lines)">
+            <span>FFT dial</span>
+            <input id="tuneFftDial" type="range" min="0" max="80" step="1" />
+            <span class="tune-val" id="tuneFftDialVal">20%</span>
+          </label>
+          <p class="hint tune-hint" id="tuneArcpathHint"></p>
+          <button id="tuneArcpathReset" type="button" class="btn-secondary">Reset defaults</button>
+        </div>
+      </details>
       <div id="e10Compare" class="e10-box hidden"></div>
     </div>
   </section>
@@ -89,7 +164,8 @@
     <h2>Stations (live)</h2>
     <p class="hint">
       Zoom in (level 11+) to load stations automatically (max 50 per view, 25&nbsp;km radius).
-      Blue pins = loading · green = prices loaded. Click a pin to load 25&nbsp;km around that station.
+      Blue pins = loading · loaded pins scale green→red from cheapest to dearest in the current view
+      (lowest = gold). Click a pin to load 25&nbsp;km around that station.
     </p>
     <div class="map-controls">
       <label>
@@ -132,6 +208,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="brands.js"></script>
+  <script src="cycleModels.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

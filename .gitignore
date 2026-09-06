@@ -23,3 +23,7 @@ build/
 *.pbw
 .DS_Store
 Thumbs.db
+
+# Local Cursor / data-branch worktree scratch (never publish on main)
+.cursor/
+.data-branch/

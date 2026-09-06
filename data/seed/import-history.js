@@ -1,6 +1,7 @@
 'use strict';
 
-// One-off backfill from official open-data archives into published state JSON.
+// One-off backfill from official open-data archives into published state JSON
+// and per-station day shards under docs/v1/stations/.
 //
 //   node data/seed/import-history.js
 //   node data/seed/import-history.js --days 90 --sources nsw,qld,nt,wa
@@ -12,8 +13,14 @@
 const fs = require('fs');
 const path = require('path');
 const history = require('../lib/history');
+const stationHistory = require('../lib/stationHistory');
 const { STATES } = require('../lib/states');
-const { mergeStateDays, trimAllStates, countFilledDays } = require('../lib/import/merge');
+const {
+  mergeStateDays,
+  mergeStationDays,
+  trimAllStates,
+  countFilledDays,
+} = require('../lib/import/merge');
 const nsw = require('../lib/import/nswFuelcheckArchive');
 const qld = require('../lib/import/qldOpenData');
 const nt = require('../lib/import/ntMyfuelArchive');
@@ -67,6 +74,19 @@ async function applyImport(label, byState, source, granularity) {
   return totalSlots;
 }
 
+function applyStationImport(label, stationsByDay) {
+  if (!stationsByDay || !stationsByDay.size) {
+    console.log(`  stations (${label}): none`);
+    return;
+  }
+  if (args.dryRun) {
+    console.log(`  stations (${label}): would write ${stationsByDay.size} day shard(s)`);
+    return;
+  }
+  const { days, stations } = mergeStationDays(DOCS_DIR, stationsByDay, { onlyEmpty: true });
+  console.log(`  stations (${label}): wrote ${days} new day shard(s), ${stations} outlet rows`);
+}
+
 async function main() {
   console.log(`import-history: ${args.days}-day window → ${DOCS_DIR}`);
   console.log(`cache: ${CACHE_DIR}`);
@@ -76,7 +96,10 @@ async function main() {
 
   if (args.sources.has('nsw')) {
     console.log('\nNSW/ACT/TAS (FuelCheck archives)…');
-    const { byState, localFiles, skippedXls } = await nsw.importNswActTas(CACHE_DIR, args.days);
+    const { byState, stationsByDay, localFiles, skippedXls } = await nsw.importNswActTas(
+      CACHE_DIR,
+      args.days
+    );
     if (localFiles) console.log(`  parsed ${localFiles} local file(s) from cache/nsw/`);
     if (skippedXls && skippedXls.length) {
       console.log(
@@ -91,17 +114,19 @@ async function main() {
       );
     }
     await applyImport('NSW archive', byState, nsw.ATTRIBUTION, 'state');
+    applyStationImport('NSW archive', stationsByDay);
   }
 
   if (args.sources.has('qld')) {
     console.log('\nQLD (open data CSV)…');
-    const byState = await qld.importQld(CACHE_DIR, args.days);
+    const { byState, stationsByDay } = await qld.importQld(CACHE_DIR, args.days);
     await applyImport('QLD archive', byState, qld.ATTRIBUTION, 'metro');
+    applyStationImport('QLD archive', stationsByDay);
   }
 
   if (args.sources.has('nt')) {
     console.log('\nNT (MyFuel CKAN XLSX)…');
-    const { byState, meta } = await nt.importNt(CACHE_DIR, args.days);
+    const { byState, stationsByDay, meta } = await nt.importNt(CACHE_DIR, args.days);
     if (!byState.size) {
       console.log(
         `  no rows in window ${meta.window.startIso}…${meta.window.endIso}` +
@@ -117,6 +142,7 @@ async function main() {
       console.log(`  filled ${meta.daysFilled} day(s) from archive`);
     }
     await applyImport('NT archive', byState, nt.ATTRIBUTION, 'metro');
+    applyStationImport('NT archive', stationsByDay);
 
     console.log('\nNT (MyFuel Trends JSON, ~28-day metro avg)…');
     const trends = await ntTrends.importNtTrends(args.days);
@@ -129,14 +155,16 @@ async function main() {
       console.log('  no Trends rows in window');
     }
     await applyImport('NT Trends', trends.byState, ntTrends.ATTRIBUTION, 'metro');
+    // Trends API is regional averages only — no per-station rows.
   }
 
   if (args.sources.has('wa')) {
     console.log('\nWA (FuelWatch RSS + optional zip cache)…');
-    const { byState, waCsv, waZips } = await wa.importWa(CACHE_DIR, args.days);
+    const { byState, stationsByDay, waCsv, waZips } = await wa.importWa(CACHE_DIR, args.days);
     if (waCsv) console.log(`  parsed ${waCsv} WA CSV file(s) from cache`);
     if (waZips) console.log(`  parsed ${waZips} WA zip file(s) from cache`);
     await applyImport('WA', byState, wa.ATTRIBUTION, 'metro');
+    applyStationImport('WA', stationsByDay);
     console.log(
       '  note: RSS only covers today/yesterday; for full WA backfill add FuelWatchRetail-*.csv.zip to',
       path.join(CACHE_DIR, 'wa')
@@ -145,6 +173,7 @@ async function main() {
 
   if (!args.dryRun) {
     trimAllStates(DOCS_DIR, STATES);
+    stationHistory.writeIndex(DOCS_DIR, STATES);
     const indexPath = path.join(DOCS_DIR, 'v1', 'index.json');
     const index = {
       v: history.SCHEMA,
@@ -153,6 +182,10 @@ async function main() {
       units: 'tenths of a cent per litre',
       fuels: require('../lib/fuels').FUELS,
       states: STATES.map((s) => ({ code: s, file: `${s}.json` })),
+      stations: {
+        index: 'stations/index.json',
+        note: 'Per-station daily prices (not downloaded by the watch)',
+      },
     };
     fs.mkdirSync(path.dirname(indexPath), { recursive: true });
     fs.writeFileSync(indexPath, JSON.stringify(index, null, 1) + '\n');

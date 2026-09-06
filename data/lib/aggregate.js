@@ -29,6 +29,43 @@ function quantile(sorted, q) {
   return Math.round(sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo));
 }
 
+/** Geometric mean of positive prices (tenths). Softens high outliers vs arithmetic mean. */
+function geomean(values) {
+  if (!values.length) return null;
+  let logSum = 0;
+  let n = 0;
+  for (const v of values) {
+    if (typeof v !== 'number' || !(v > 0)) continue;
+    logSum += Math.log(v);
+    n++;
+  }
+  if (!n) return null;
+  return Math.round(Math.exp(logSum / n));
+}
+
+/**
+ * Most common price (exact tenths). On a tie, pick the tied value nearest the median.
+ * Returns null when every price is unique (no repeated mode).
+ */
+function mode(values) {
+  if (!values.length) return null;
+  const counts = new Map();
+  for (const v of values) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    counts.set(v, (counts.get(v) || 0) + 1);
+  }
+  if (!counts.size) return null;
+  let bestCount = 0;
+  for (const c of counts.values()) if (c > bestCount) bestCount = c;
+  if (bestCount < 2) return null;
+  const tied = [];
+  for (const [v, c] of counts) if (c === bestCount) tied.push(v);
+  if (tied.length === 1) return tied[0];
+  const med = median([...values].sort((a, b) => a - b));
+  tied.sort((a, b) => Math.abs(a - med) - Math.abs(b - med) || a - b);
+  return tied[0];
+}
+
 function summarise(values) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -37,6 +74,8 @@ function summarise(values) {
   return {
     n: sorted.length,
     avg: Math.round(sum / sorted.length),
+    gmean: geomean(sorted),
+    mode: mode(sorted),
     med: median(sorted),
     p10: quantile(sorted, 0.1),
     min: sorted[0],
@@ -46,17 +85,22 @@ function summarise(values) {
 
 /**
  * @param {Array} stations normalised station records with `prices` in tenths
- * @returns {Object} state code -> { state: {fuel: stats}, metro: {fuel: stats} }
+ * @returns {Object} state code -> {
+ *   state: {fuel: stats},
+ *   metro: {fuel: stats},
+ *   regional: {fuel: stats}  // state stations outside metro
+ * }
  */
 function aggregate(stations) {
   const buckets = new Map();
 
   function bucket(state) {
     if (!buckets.has(state)) {
-      buckets.set(state, { state: {}, metro: {} });
+      buckets.set(state, { state: {}, metro: {}, regional: {} });
       for (const f of FUELS) {
         buckets.get(state).state[f] = [];
         buckets.get(state).metro[f] = [];
+        buckets.get(state).regional[f] = [];
       }
     }
     return buckets.get(state);
@@ -76,20 +120,23 @@ function aggregate(stations) {
       if (typeof price !== 'number') continue;
       b.state[fuel].push(price);
       if (inMetro) b.metro[fuel].push(price);
+      else b.regional[fuel].push(price);
     }
   }
 
   const out = {};
   for (const [state, b] of buckets) {
-    out[state] = { state: {}, metro: {} };
+    out[state] = { state: {}, metro: {}, regional: {} };
     for (const f of FUELS) {
       const st = summarise(b.state[f]);
       const me = summarise(b.metro[f]);
+      const reg = summarise(b.regional[f]);
       if (st) out[state].state[f] = st;
       if (me) out[state].metro[f] = me;
+      if (reg) out[state].regional[f] = reg;
     }
   }
   return out;
 }
 
-module.exports = { aggregate, summarise };
+module.exports = { aggregate, summarise, geomean, mode };

@@ -2,7 +2,8 @@
 
 Official open-data archives are **event logs** or **daily snapshots**, not the same
 as the live APIs. This tool aggregates them into the same `{avg, min, max, n}` daily
-shape as `collect.js` and fills **empty** slots in `docs/v1/*.json`.
+shape as `collect.js` and fills **empty** slots in `docs/v1/*.json`. It also writes
+per-station day shards under `docs/v1/stations/{STATE}/days/` (plus a catalog).
 
 ```bash
 node data/seed/import-history.js
@@ -14,22 +15,19 @@ Downloads cache to `data/seed/.import-cache/` (gitignored).
 
 ## Sources
 
-| Flag | States | Archive | Metro? |
-| --- | --- | --- | --- |
-| `nsw` | NSW, ACT, TAS | [Data.NSW FuelCheck](https://data.nsw.gov.au/data/dataset/fuel-check) monthly CSV/XLSX + local cache | state-wide (no coords) |
-| `qld` | QLD | [QLD open data](https://www.data.qld.gov.au/dataset/fuel-price-reporting-2026) monthly CSV | yes (lat/lng) |
-| `nt` | NT | [NTG MyFuel](https://data.nt.gov.au/dataset/?groups=driving) monthly XLSX + [MyFuel Trends JSON](https://myfuelnt.nt.gov.au/Trends/GetTrends?fueltypeId=DL&period=Monthly&regionId=3) | yes (XLSX regions/coords; Trends = Greater Darwin avg) |
+| Flag | States | Archive | Metro? | Stations? |
+| --- | --- | --- | --- | --- |
+| `nsw` | NSW, ACT, TAS | [Data.NSW FuelCheck](https://data.nsw.gov.au/data/dataset/fuel-check) monthly CSV/XLSX + local cache | state-wide (no coords) | yes (weak id: postcode+name) |
+| `qld` | QLD | [QLD open data](https://www.data.qld.gov.au/dataset/fuel-price-reporting-2026) monthly CSV | yes (lat/lng) | yes (SiteId) |
+| `nt` | NT | [NTG MyFuel](https://data.nt.gov.au/dataset/?groups=driving) monthly XLSX + Trends JSON | yes | XLSX yes; Trends **no** |
+| `wa` | WA | FuelWatch RSS (`today`, `yesterday`) + optional zip/CSV cache | yes | yes |
 
 **NT notes:**
 - CKAN monthly XLSX archives currently stop at **November 2024**, so they do not
   cover the live 90-day window.
-- `--sources nt` therefore also calls MyFuel’s site Trends API
-  (`/Trends/GetTrendsJson`, `period=Monthly`) and fills empty slots with the
-  last **~28 daily averages** for Greater Darwin (Darwin + Palmerston +
-  Litchfield, unweighted mean of regional avgs). Trends rows are **avg-only**
-  (`min` / `max` / `n` / `med` stay null).
+- `--sources nt` also calls MyFuel’s Trends API for ~28 Greater Darwin daily
+  averages (avg-only; **no station rows**).
 - Remaining older days still only accumulate via daily `collect.js`.
-| `wa` | WA | FuelWatch RSS (`today`, `yesterday`) + optional zip/CSV cache | yes (coords / Metro region) |
 
 ### NSW / ACT / TAS local backfill
 
@@ -37,20 +35,24 @@ Drop monthly FuelCheck price-history files into:
 
 `data/seed/.import-cache/nsw/`
 
-Supported: **`.csv`** and **`.xlsx`**. Legacy **`.xls`** (Excel 97–2003) is not supported —
-open in Excel/LibreOffice and Save As `.xlsx` or `.csv` first.
-
-Expected columns (Data.NSW layout): `ServiceStationName`, `Address`, `Suburb`,
-`Postcode`, `Brand`, `FuelCode`, `PriceUpdatedDate`, `Price`.
+Supported: **`.csv`** and **`.xlsx`**. Legacy **`.xls`** is not supported.
 
 ### WA full backfill
 
-The RSS API does **not** expose arbitrary dates. For more than ~2 days, download monthly
-`FuelWatchRetail-*.csv` (or `.csv.zip`) from the FuelWatch historic portal and place them in:
+For more than ~2 days, download monthly `FuelWatchRetail-*.csv` (or `.csv.zip`)
+into `data/seed/.import-cache/wa/` and re-run.
 
-`data/seed/.import-cache/wa/`
+## Station history layout
 
-Re-run the importer; it will parse any CSV/zip files found there.
+```
+docs/v1/stations/index.json
+docs/v1/stations/{STATE}/catalog.json
+docs/v1/stations/{STATE}/days/YYYY-MM-DD.json
+docs/v1/stations/archive/YYYY-MM.json
+```
+
+Prices are tenths of a cent. Day shards roll with the same 90-day window as state files.
+SA is live-only (no archive importer yet). VIC has no station source.
 
 ## Window
 

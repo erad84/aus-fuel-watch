@@ -264,6 +264,7 @@ async function importNswActTas(cacheDir, days) {
 
   return {
     byState: readingsByStateAndDay(stationsByDay, { preferMetro: false }),
+    stationsByDay,
     localFiles: local.files,
     skippedXls: local.skippedXls,
   };

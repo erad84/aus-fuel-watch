@@ -92,9 +92,22 @@ async function fetchProduct(productCode, day) {
 
 // Station identity: FuelWatch has no station id, so trading name plus suburb is
 // the key. Namespaced by source, since codes and names are only unique within a
-// source and the collector merges several.
+// source and the collector merges several. Retail CSV archives use the same
+// TRADING_NAME + LOCATION fields, so archive rows share this id.
+function normPart(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function keyOf(name, suburb) {
-  return `${NAME}:WA:${(name || '').toLowerCase()}|${(suburb || '').toLowerCase()}`;
+  return `${NAME}:WA:${normPart(name)}|${normPart(suburb)}`;
+}
+
+function stationId(name, suburb) {
+  return keyOf(name, suburb);
 }
 
 function parseInto(xml, fuel, out, field) {
@@ -207,6 +220,8 @@ module.exports = {
   STATES,
   PRODUCTS,
   TOMORROW_PUBLISH_HOUR,
+  stationId,
+  normPart,
   fetchStations,
   fetchStationsForDay,
 };

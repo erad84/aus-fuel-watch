@@ -123,6 +123,7 @@ async function importNt(cacheDir, days) {
   const byState = readingsByStateAndDay(stationsByDay, { preferMetro: true });
   return {
     byState,
+    stationsByDay,
     meta: {
       window: { startIso, endIso },
       packages: packages.length,

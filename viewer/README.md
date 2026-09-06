@@ -32,7 +32,10 @@ Click **Load data**, then **Load stations**.
 
 ## Data limits
 
-Station daily history is **not** stored in the pipeline yet — only live prices + session snapshots in the browser.
+Per-station daily prices are recorded under `docs/v1/stations/` by `collect.js` and
+`import-history.js` (separate from the watch’s compact state aggregates). VIC has no
+station adapter yet (Petrolmate summary only). The viewer matches map pins to the
+published catalog by coordinates (~80&nbsp;m) when history exists.
 
 ## Legacy
 

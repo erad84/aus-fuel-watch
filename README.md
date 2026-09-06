@@ -28,11 +28,13 @@ zip container by hand and inflates with Node's built-in `zlib`.
 
 `data/collect.js` runs on a schedule, fetches **station-level prices** from official
 government adapters where available, aggregates them to capital-metro and state-wide
-averages, and falls back to Petrolmate `/api/summary` only for Victoria until Servo
-Saver credentials exist. South Australia uses SAFPIS (`SA_FUEL_TOKEN`); Queensland
-uses Fuel Prices QLD (`QLD_FUEL_TOKEN`); NSW, ACT and Tasmania use NSW FuelCheck; WA
-uses FuelWatch RSS; NT uses MyFuel NT.
-Days that roll out of the window are written to `docs/v1/archive/YYYY-MM.json` first.
+averages, records per-station daily boards under `docs/v1/stations/`, and falls back
+to Petrolmate `/api/summary` only for Victoria until Servo Saver credentials exist.
+South Australia uses SAFPIS (`SA_FUEL_TOKEN`); Queensland uses Fuel Prices QLD
+(`QLD_FUEL_TOKEN`); NSW, ACT and Tasmania use NSW FuelCheck; WA uses FuelWatch RSS;
+NT uses MyFuel NT.
+Days that roll out of the window are written to `docs/v1/archive/YYYY-MM.json` first
+(aggregates) and `docs/v1/stations/archive/` (station shards).
 
 Writes only ever fill an empty slot, so re-running is safe and a retry can never overwrite a good
 reading. Three runs a day (23:07, 02:37 and 06:07 UTC) give two in-window attempts plus a catch-up.
