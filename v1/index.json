@@ -44,5 +44,9 @@
    "code": "ACT",
    "file": "ACT.json"
   }
- ]
+ ],
+ "stations": {
+  "index": "stations/index.json",
+  "note": "Per-station daily prices (not downloaded by the watch)"
+ }
 }
