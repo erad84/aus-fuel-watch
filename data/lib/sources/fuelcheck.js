@@ -176,6 +176,30 @@ function joinStations(stations, prices, out) {
   }
 }
 
+const BULK_RETRIES = 3;
+const BULK_RETRY_MS = 1500;
+
+async function fetchBulkOnce(token, key, q) {
+  const res = await fetch(`${BASE}/fuel/prices${q.qs}`, { headers: headers(token, key) });
+  if (!res.ok) throw new Error(`FuelCheck bulk prices (${q.label}) HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchBulkWithRetry(token, key, q) {
+  let lastErr;
+  for (let attempt = 1; attempt <= BULK_RETRIES; attempt++) {
+    try {
+      return await fetchBulkOnce(token, key, q);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < BULK_RETRIES) {
+        await new Promise((r) => setTimeout(r, BULK_RETRY_MS * attempt));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * @returns {{source, attribution, licence, fetchedAt, stations: Array, notes: Array}}
  */
@@ -184,14 +208,22 @@ async function fetchStations() {
   const token = await getToken(key, secret);
   const notes = [];
   const out = new Map();
+  let okQueries = 0;
 
   for (const q of BULK_QUERIES) {
-    const res = await fetch(`${BASE}/fuel/prices${q.qs}`, { headers: headers(token, key) });
-    if (!res.ok) throw new Error(`FuelCheck bulk prices (${q.label}) HTTP ${res.status}`);
-    const body = await res.json();
-    joinStations(body.stations || [], body.prices || [], out);
-    notes.push(`${q.label}: ${(body.stations || []).length} stations`);
+    try {
+      const body = await fetchBulkWithRetry(token, key, q);
+      joinStations(body.stations || [], body.prices || [], out);
+      notes.push(`${q.label}: ${(body.stations || []).length} stations`);
+      okQueries++;
+    } catch (err) {
+      notes.push(`${q.label}: FAILED (${err.message})`);
+    }
     await new Promise((r) => setTimeout(r, 1100));
+  }
+
+  if (!okQueries) {
+    throw new Error(`FuelCheck: all bulk queries failed (${notes.join('; ')})`);
   }
 
   const stations = [...out.values()].filter((s) => Object.keys(s.prices).length > 0);

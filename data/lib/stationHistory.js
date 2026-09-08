@@ -9,8 +9,9 @@
 //   docs/v1/stations/{STATE}/days/YYYY-MM-DD.json
 //   docs/v1/stations/archive/YYYY-MM.json
 //
-// Day files store tenths-of-a-cent integers. Writes fill empty days only
-// (same idempotent policy as aggregate history).
+// Day files store tenths-of-a-cent integers. Live collect freshens today's
+// prices (overwrites fuels present in the census, keeps gaps). Import/backfill
+// still fills empty fuels only.
 
 const fs = require('fs');
 const path = require('path');
@@ -176,10 +177,17 @@ function isDayEmpty(docsDir, state, iso) {
 
 /**
  * Write one local calendar day of station prices for a state.
+ *
+ * opts.onlyEmpty (default true): import/backfill — skip if day exists; within a
+ *   day only fill fuels that are still null.
+ * opts.freshen (collect): merge into an existing day — overwrite any fuel present
+ *   in this census; leave stations/fuels absent from the fetch unchanged.
+ *
  * @returns {{ wrote: boolean, stations: number }}
  */
 function writeDay(docsDir, state, iso, stations, opts) {
-  const onlyEmpty = !opts || opts.onlyEmpty !== false;
+  const freshen = Boolean(opts && opts.freshen);
+  const onlyEmpty = freshen ? false : !opts || opts.onlyEmpty !== false;
   if (!state || !iso || !stations || !stations.length) {
     return { wrote: false, stations: 0 };
   }
@@ -191,7 +199,7 @@ function writeDay(docsDir, state, iso, stations, opts) {
   const map = existed ? dayToMap(loadDay(docsDir, state, iso)) : new Map();
   const catalog = loadCatalog(docsDir, state);
   let n = 0;
-  let addedFuels = 0;
+  let changed = 0;
 
   for (const st of stations) {
     if (!st || st.state !== state) continue;
@@ -208,14 +216,19 @@ function writeDay(docsDir, state, iso, stations, opts) {
     if (map.has(id)) {
       const prev = map.get(id);
       for (const [f, v] of Object.entries(slim)) {
-        if (prev[f] == null) {
+        if (freshen) {
+          if (prev[f] !== v) {
+            prev[f] = v;
+            changed++;
+          }
+        } else if (prev[f] == null) {
           prev[f] = v;
-          addedFuels++;
+          changed++;
         }
       }
     } else {
       map.set(id, slim);
-      addedFuels += Object.keys(slim).length;
+      changed += Object.keys(slim).length;
     }
 
     catalog.stations[id] = mergeCatalogEntry(catalog.stations[id], catalogMetaFromStation(st));
@@ -223,8 +236,8 @@ function writeDay(docsDir, state, iso, stations, opts) {
   }
 
   if (!map.size) return { wrote: false, stations: 0 };
-  // Existing day with nothing new to fill (e.g. re-run after LPG already merged).
-  if (existed && addedFuels === 0) return { wrote: false, stations: 0 };
+  // Existing day with nothing new (fill) or unchanged (freshen).
+  if (existed && changed === 0) return { wrote: false, stations: 0 };
 
   const p = dayPath(docsDir, state, iso);
   fs.mkdirSync(path.dirname(p), { recursive: true });

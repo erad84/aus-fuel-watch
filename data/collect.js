@@ -1,17 +1,21 @@
 'use strict';
 
-// Daily entry point for the scheduled job.
+// Entry point for the scheduled collect job (up to six times per AEST day).
 //
 // Fetches station-level prices from official adapters, aggregates to state and
 // capital-metro averages, and falls back to Petrolmate /api/summary only for
-// jurisdictions without a station source. Also records per-station daily prices
-// under docs/v1/stations/ (separate from phone-facing aggregates).
+// jurisdictions without a station source this run (and only into empty today
+// slots, so Petrolmate never clobbers a good official census). Also records
+// per-station daily prices under docs/v1/stations/.
 //
-// Writes are idempotent and only ever fill an empty slot.
+// Today's aggregate slots are overwritten whenever a reading passes checks.
+// Station day files are freshened: fuels present in the census overwrite;
+// missing stations/fuels keep earlier same-day values. Past calendar days are
+// not rewritten by this job.
 //
 // Usage:
 //   node --env-file=.env data/collect.js
-//   node --env-file=.env data/collect.js --catchup
+//   node --env-file=.env data/collect.js --catchup   (accepted; no-op alias)
 //   node --env-file=.env data/collect.js --dry-run
 
 const fs = require('fs');
@@ -24,9 +28,6 @@ const cyclefit = require('./lib/cyclefit');
 const { FUELS } = require('./lib/fuels');
 const { STATES, localParts } = require('./lib/states');
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, '..', 'docs');
-
-const WINDOW_START_HOUR = 7;
-const WINDOW_END_HOUR = 13;
 
 const MIN_STATIONS = 25;
 const MIN_STATIONS_SAMPLED = 10;
@@ -194,7 +195,9 @@ function readingsFromPetrolmate(state, snap) {
 
 async function main() {
   const args = process.argv.slice(2);
+  // --catchup kept as a no-op alias for older workflow_dispatch / docs.
   const catchup = args.includes('--catchup');
+  void catchup;
   const dryRun = args.includes('--dry-run');
 
   const { stations, attributions, notes: srcNotes, sampledStates } = await fetchAllStations();
@@ -252,7 +255,6 @@ async function main() {
     }
 
     const { day, hour } = localParts(now, state);
-    const inWindow = hour >= WINDOW_START_HOUR && hour <= WINDOW_END_HOUR;
     const file = history.load(DOCS_DIR, state);
 
     history.roll(DOCS_DIR, file, day);
@@ -273,38 +275,12 @@ async function main() {
         const reading = scopeReadings[fuel];
         if (!reading) continue;
 
-        if (!inWindow && !catchup) {
-          skipped++;
-          continue;
-        }
-
         const checkOpts = { sampled: sampledStates.has(state), state, scope };
         const existing = history.getDay(file, fuel, day, scope);
-        if (existing) {
-          let filled = false;
-          if (reading.gmean != null && existing.gmean == null) {
-            const reason = checkReading(file, fuel, day, reading, premiumInverted, checkOpts);
-            if (reason) {
-              notes.push(`  skip gmean ${scope}/${fuel}: ${reason}`);
-            } else {
-              history.setGmean(file, fuel, day, reading.gmean, scope);
-              notes.push(`  gmean ${scope}/${fuel}: ${fmt(reading.gmean)}c`);
-              wrote++;
-              filled = true;
-            }
-          }
-          if (reading.mode != null && existing.mode == null) {
-            const reason = checkReading(file, fuel, day, reading, premiumInverted, checkOpts);
-            if (reason) {
-              notes.push(`  skip mode ${scope}/${fuel}: ${reason}`);
-            } else {
-              history.setMode(file, fuel, day, reading.mode, scope);
-              notes.push(`  mode ${scope}/${fuel}: ${fmt(reading.mode)}c`);
-              wrote++;
-              filled = true;
-            }
-          }
-          if (!filled) skipped++;
+
+        // Petrolmate must not overwrite a day already written from stations.
+        if (!fromStations && existing) {
+          skipped++;
           continue;
         }
 
@@ -325,44 +301,44 @@ async function main() {
 
         history.setDay(file, fuel, day, reading, scope);
         notes.push(
-          `  wrote ${scope}/${fuel}: avg ${fmt(reading.avg)}c  n ${reading.n}`
+          `  ${existing ? 'refresh' : 'wrote'} ${scope}/${fuel}: avg ${fmt(reading.avg)}c  n ${reading.n}`
         );
         wrote++;
       }
     }
 
     // Per-station board for this local day (states with a station adapter).
-    if (fromStations && (inWindow || catchup) && !dryRun) {
+    if (fromStations && !dryRun) {
       const stateStations = stations.filter((s) => s.state === state);
       const stWrite = stationHistory.writeDay(DOCS_DIR, state, day, stateStations, {
-        // Fill missing fuels (e.g. newly added LPG) without overwriting existing prices.
-        onlyEmpty: false,
+        freshen: true,
       });
       if (stWrite.wrote) {
         stationDaysWrote++;
         stationRowsWrote += stWrite.stations;
-        notes.push(`  stations: recorded ${stWrite.stations} outlet(s)`);
+        notes.push(`  stations: freshened ${stWrite.stations} outlet(s)`);
       } else if (!stationHistory.isDayEmpty(DOCS_DIR, state, day)) {
-        notes.push('  stations: day already recorded');
+        notes.push('  stations: unchanged');
       }
-    } else if (fromStations && !dryRun && !inWindow && !catchup) {
-      notes.push('  stations: skipped (outside collect window)');
-    } else if (fromStations && dryRun && (inWindow || catchup)) {
+    } else if (fromStations && dryRun) {
       const stateStations = stations.filter((s) => s.state === state && Object.keys(s.prices || {}).length);
-      notes.push(`  stations: would record ~${stateStations.length} outlet(s)`);
+      notes.push(`  stations: would freshen ~${stateStations.length} outlet(s)`);
     }
 
     file.params = resolveParams(file);
     file.generated = new Date().toISOString();
     file.defaultScope = fromStations ? 'metro' : 'state';
     history.syncPrimaryFuels(file);
-    file.sourceGeneratedAt = petrolmateSnap ? petrolmateSnap.generatedAt : file.generated;
+    // Prefer official adapter timestamp; only stamp Petrolmate when this state used it.
+    if (!fromStations && petrolmateSnap) {
+      file.sourceGeneratedAt = petrolmateSnap.generatedAt;
+    } else {
+      file.sourceGeneratedAt = file.generated;
+    }
     file.attribution = attributionParts.join('; ');
 
     console.log(
-      `${state}: local ${day} ${String(hour).padStart(2, '0')}h ${
-        inWindow ? 'in-window' : catchup ? 'catch-up' : 'out-of-window'
-      }, scopes metro/regional/state, default=${file.defaultScope}, ${file.days} day(s) held`
+      `${state}: local ${day} ${String(hour).padStart(2, '0')}h refresh, scopes metro/regional/state, default=${file.defaultScope}, ${file.days} day(s) held`
     );
     for (const n of notes) console.log(n);
 

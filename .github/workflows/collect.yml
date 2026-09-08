@@ -1,23 +1,24 @@
 name: collect
 
-# Accumulates fuel price history from official government feeds. A missed day
-# cannot be backfilled, so there are three scheduled attempts per day and writes
-# only ever fill an empty slot.
+# Refreshes today's fuel prices up to six times (AEST / UTC+10). Past days stay
+# immutable; each successful run overwrites today's aggregate slots and freshens
+# station prices where the census has newer values.
 
 on:
   schedule:
-    # 23:07 UTC → ~07:07–10:07 local in every state (inside the sampling window).
-    - cron: '7 23 * * *'
-    # Mid-morning retry, still inside the window for eastern states.
-    - cron: '37 2 * * *'
-    # Catch-up: fill any still-empty slot regardless of local hour.
-    - cron: '7 6 * * *'
+    # 05:00 AEST → 19:00 UTC (previous calendar day in UTC)
+    - cron: '0 19 * * *'
+    # 08:00 AEST
+    - cron: '0 22 * * *'
+    # 11:00 AEST
+    - cron: '0 1 * * *'
+    # 14:00 AEST
+    - cron: '0 4 * * *'
+    # 17:00 AEST
+    - cron: '0 7 * * *'
+    # 20:00 AEST
+    - cron: '0 10 * * *'
   workflow_dispatch:
-    inputs:
-      catchup:
-        description: 'Fill empty slots regardless of local hour'
-        type: boolean
-        default: true
 
 concurrency:
   group: collect
@@ -65,12 +66,7 @@ jobs:
           SA_FUEL_TOKEN: ${{ secrets.SA_FUEL_TOKEN }}
           QLD_FUEL_TOKEN: ${{ secrets.QLD_FUEL_TOKEN }}
           VIC_FUEL_API_KEY: ${{ secrets.VIC_FUEL_API_KEY }}
-        run: |
-          if [ "${{ github.event.schedule }}" = "7 6 * * *" ] || [ "${{ inputs.catchup }}" = "true" ]; then
-            node data/collect.js --catchup
-          else
-            node data/collect.js
-          fi
+        run: node data/collect.js
 
       - name: Commit and push data branch
         working-directory: docs
