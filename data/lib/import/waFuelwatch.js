@@ -18,6 +18,7 @@ const PRODUCT_FUEL = {
   1: 'U91',
   2: 'P95',
   4: 'DSL',
+  5: 'LPG',
   6: 'P98',
   11: 'PDSL',
 };

@@ -33,6 +33,7 @@ const PRICE_UNAVAILABLE = 9999;
 const FUEL_MAP = {
   2: 'U91',
   3: 'DSL',
+  4: 'LPG',
   5: 'P95',
   8: 'P98',
   12: 'E10',

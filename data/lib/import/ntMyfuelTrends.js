@@ -22,6 +22,7 @@ const FUEL_MAP = {
   P98: 'P98',
   DL: 'DSL',
   PD: 'PDSL',
+  LPG: 'LPG',
 };
 
 // Greater Darwin regions on the Trends dropdown (matches live metro grouping).

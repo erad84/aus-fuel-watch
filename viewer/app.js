@@ -23,6 +23,7 @@ const FUEL_LABELS = {
   P98: 'Premium 98',
   DSL: 'Diesel',
   PDSL: 'Premium diesel',
+  LPG: 'LPG',
 };
 const SCOPE_IDS = ['metro', 'regional', 'state'];
 /** Disable a scope option when latest station count is below this. */
@@ -32,6 +33,7 @@ const MIN_SCOPE_N_OVERRIDE = {
   ACT: { DSL: 10, regional: 5 },
   NT: { regional: 10 },
 };
+const MIN_SCOPE_N_LPG = 8;
 const PETROLMATE_FUEL = {
   ULP: 'U91',
   E10: 'E10',
@@ -474,6 +476,7 @@ function latestScopeN(file, fuel, scope) {
 }
 
 function minScopeN(state, fuel, scope) {
+  if (fuel === 'LPG') return MIN_SCOPE_N_LPG;
   const byState = MIN_SCOPE_N_OVERRIDE[state];
   if (byState) {
     if (byState[fuel] !== undefined) return byState[fuel];

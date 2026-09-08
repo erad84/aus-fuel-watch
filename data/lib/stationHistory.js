@@ -183,13 +183,15 @@ function writeDay(docsDir, state, iso, stations, opts) {
   if (!state || !iso || !stations || !stations.length) {
     return { wrote: false, stations: 0 };
   }
-  if (onlyEmpty && !isDayEmpty(docsDir, state, iso)) {
+  const existed = !isDayEmpty(docsDir, state, iso);
+  if (onlyEmpty && existed) {
     return { wrote: false, stations: 0 };
   }
 
-  const map = onlyEmpty ? new Map() : dayToMap(loadDay(docsDir, state, iso));
+  const map = existed ? dayToMap(loadDay(docsDir, state, iso)) : new Map();
   const catalog = loadCatalog(docsDir, state);
   let n = 0;
+  let addedFuels = 0;
 
   for (const st of stations) {
     if (!st || st.state !== state) continue;
@@ -203,16 +205,17 @@ function writeDay(docsDir, state, iso, stations, opts) {
     }
     if (!Object.keys(slim).length) continue;
 
-    if (onlyEmpty && map.has(id)) {
-      // Day was empty so map starts empty; within-batch merge fuels.
-      Object.assign(map.get(id), slim);
-    } else if (!onlyEmpty && map.has(id)) {
+    if (map.has(id)) {
       const prev = map.get(id);
       for (const [f, v] of Object.entries(slim)) {
-        if (prev[f] == null) prev[f] = v;
+        if (prev[f] == null) {
+          prev[f] = v;
+          addedFuels++;
+        }
       }
     } else {
       map.set(id, slim);
+      addedFuels += Object.keys(slim).length;
     }
 
     catalog.stations[id] = mergeCatalogEntry(catalog.stations[id], catalogMetaFromStation(st));
@@ -220,6 +223,8 @@ function writeDay(docsDir, state, iso, stations, opts) {
   }
 
   if (!map.size) return { wrote: false, stations: 0 };
+  // Existing day with nothing new to fill (e.g. re-run after LPG already merged).
+  if (existed && addedFuels === 0) return { wrote: false, stations: 0 };
 
   const p = dayPath(docsDir, state, iso);
   fs.mkdirSync(path.dirname(p), { recursive: true });

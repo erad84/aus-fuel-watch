@@ -32,13 +32,14 @@ const LICENCE = 'WA Government open data, CC BY 4.0';
 const STATES = ['WA'];
 
 // FuelWatch Product codes, confirmed by item counts and relative price:
-//   1 ULP (940)   2 PULP 95 (524)   4 Diesel (677)   6 98 RON (727)   11 Brand Diesel (458)
-// 5 is LPG and 10 is a 13-station oddity priced like a truck-stop product;
-// both are outside our canon. WA has no E10, which matches Petrolmate.
+//   1 ULP (940)   2 PULP 95 (524)   4 Diesel (677)   5 LPG (~36)
+//   6 98 RON (727)   11 Brand Diesel (458)
+// Product 10 is a 13-station truck-stop oddity, left out. WA has no E10.
 const PRODUCTS = [
   { code: 1, fuel: 'U91' },
   { code: 2, fuel: 'P95' },
   { code: 4, fuel: 'DSL' },
+  { code: 5, fuel: 'LPG' },
   { code: 6, fuel: 'P98' },
   { code: 11, fuel: 'PDSL' },
 ];

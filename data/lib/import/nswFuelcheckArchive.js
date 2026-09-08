@@ -26,6 +26,7 @@ const FUEL_MAP = {
   P98: 'P98',
   DL: 'DSL',
   PDL: 'PDSL',
+  LPG: 'LPG',
 };
 
 const MONTHS = {

@@ -20,6 +20,8 @@ const FUEL_MAP = {
   'PULP 98 RON': 'P98',
   Diesel: 'DSL',
   'Premium Diesel': 'PDSL',
+  LPG: 'LPG',
+  Autogas: 'LPG',
 };
 
 function parseQldUtc(s) {

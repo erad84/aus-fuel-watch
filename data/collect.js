@@ -35,10 +35,16 @@ const MIN_STATIONS_OVERRIDE = {
   TAS: { E10: 2 },
   ACT: { DSL: 10 },
 };
+// Autogas networks are thin vs ULP; WA statewide LPG is only ~36 sites.
+const MIN_STATIONS_LPG = 8;
+const MIN_STATIONS_LPG_SAMPLED = 3;
 const MIN_COVERAGE_RATIO = 0.6;
 const MAX_DAILY_MOVE = 500;
 const MIN_PLAUSIBLE = 500;
 const MAX_PLAUSIBLE = 5000;
+// Autogas sits well below ULP; allow down to 20c/L.
+const MIN_PLAUSIBLE_LPG = 200;
+const MAX_PLAUSIBLE_LPG = 3000;
 const REANCHOR_MIN_DAYS = 45;
 
 function fmt(tenths) {
@@ -46,6 +52,7 @@ function fmt(tenths) {
 }
 
 function minStations(state, fuel, sampled) {
+  if (fuel === 'LPG') return sampled ? MIN_STATIONS_LPG_SAMPLED : MIN_STATIONS_LPG;
   const byFuel = MIN_STATIONS_OVERRIDE[state];
   if (byFuel && byFuel[fuel] !== undefined) return byFuel[fuel];
   return sampled ? MIN_STATIONS_SAMPLED : MIN_STATIONS;
@@ -60,7 +67,9 @@ function checkReading(file, fuel, iso, reading, premiumInverted, opts) {
   if (scope === 'regional') minN = Math.min(minN, 10);
 
   if (reading.avg === null) return 'avg missing or non-numeric';
-  if (reading.avg < MIN_PLAUSIBLE || reading.avg > MAX_PLAUSIBLE) {
+  const minP = fuel === 'LPG' ? MIN_PLAUSIBLE_LPG : MIN_PLAUSIBLE;
+  const maxP = fuel === 'LPG' ? MAX_PLAUSIBLE_LPG : MAX_PLAUSIBLE;
+  if (reading.avg < minP || reading.avg > maxP) {
     return `avg ${fmt(reading.avg)}c outside plausible range`;
   }
   if (premiumInverted && (fuel === 'P95' || fuel === 'P98')) {
@@ -326,7 +335,8 @@ async function main() {
     if (fromStations && (inWindow || catchup) && !dryRun) {
       const stateStations = stations.filter((s) => s.state === state);
       const stWrite = stationHistory.writeDay(DOCS_DIR, state, day, stateStations, {
-        onlyEmpty: true,
+        // Fill missing fuels (e.g. newly added LPG) without overwriting existing prices.
+        onlyEmpty: false,
       });
       if (stWrite.wrote) {
         stationDaysWrote++;

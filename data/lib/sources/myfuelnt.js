@@ -44,6 +44,7 @@ const FUEL_MAP = {
   P98: 'P98',
   DL: 'DSL',
   PD: 'PDSL',
+  LPG: 'LPG',
 };
 
 // The site's own regions. Greater Darwin is Darwin, Palmerston and Litchfield,

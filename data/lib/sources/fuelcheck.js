@@ -48,6 +48,7 @@ const FUEL_MAP = {
   P98: 'P98',
   DL: 'DSL',
   PDL: 'PDSL',
+  LPG: 'LPG',
 };
 
 // The default payload carries NSW and ACT together; Tasmania needs its own

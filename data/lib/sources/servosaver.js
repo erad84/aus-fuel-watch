@@ -31,6 +31,7 @@ const FUEL_MAP = {
   P98: 'P98',
   DSL: 'DSL',
   PDSL: 'PDSL',
+  LPG: 'LPG',
 };
 
 function requireKey() {
