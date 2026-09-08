@@ -64,7 +64,7 @@ let stationsLive = [];
 let selectedStationId = null;
 let stationFetchTimer = null;
 let stationFetchInFlight = false;
-const MIN_ZOOM_STATIONS = 11;
+const MIN_ZOOM_STATIONS = 13;
 /** @type {Record<string, {date: string, prices: Record<string, number>}>} */
 const stationSnapshots = {};
 
@@ -1656,6 +1656,11 @@ function initMap() {
 
   map.on('moveend zoomend', () => {
     updateMapZoomHint();
+    if (!map || map.getZoom() < MIN_ZOOM_STATIONS) {
+      clearStationMarkers();
+      rebuildStationList();
+      return;
+    }
     redrawStationMarkers();
     rebuildStationList();
     scheduleStationFetch();
@@ -1932,6 +1937,12 @@ function stationsInMapBounds() {
 
 function rebuildStationList() {
   const list = document.getElementById('stationList');
+  if (!list) return;
+  if (!map || map.getZoom() < MIN_ZOOM_STATIONS) {
+    list.innerHTML =
+      '<div class="station-item">Zoom in closer to load station pins.</div>';
+    return;
+  }
   const fuel = document.getElementById('fuelSelect').value;
   stationsLive = stationsInMapBounds();
   list.innerHTML = '';
@@ -1953,8 +1964,18 @@ function rebuildStationList() {
   });
 }
 
+function clearStationMarkers() {
+  if (!markerLayer) return;
+  markerLayer.clearLayers();
+  markerById.clear();
+}
+
 function redrawStationMarkers() {
   if (!markerLayer || !map) return;
+  if (map.getZoom() < MIN_ZOOM_STATIONS) {
+    clearStationMarkers();
+    return;
+  }
   markerLayer.clearLayers();
   markerById.clear();
 
@@ -2005,14 +2026,19 @@ function onStationPinClick(station) {
 async function fetchStationsAround(lat, lng, opts = {}) {
   initMap();
   if (opts.recenter && Number.isFinite(lat) && Number.isFinite(lng)) {
-    map.setView([lat, lng], Math.max(map.getZoom(), 12));
+    map.setView([lat, lng], Math.max(map.getZoom(), MIN_ZOOM_STATIONS));
   }
   return fetchPublishedStationsInView(opts);
 }
 
 async function fetchPublishedStationsInView(opts = {}) {
   initMap();
-  if (map.getZoom() < MIN_ZOOM_STATIONS && opts.fromViewport) return;
+  if (map.getZoom() < MIN_ZOOM_STATIONS) {
+    clearStationMarkers();
+    rebuildStationList();
+    updateMapZoomHint();
+    return;
+  }
 
   const list = document.getElementById('stationList');
   const states = statesForMapView();
@@ -2036,7 +2062,7 @@ async function fetchPublishedStationsInView(opts = {}) {
       added += stations.length;
     }
     if (opts.recenter && opts.lat != null && opts.lng != null) {
-      map.setView([opts.lat, opts.lng], Math.max(map.getZoom(), 12));
+      map.setView([opts.lat, opts.lng], Math.max(map.getZoom(), MIN_ZOOM_STATIONS));
     }
     redrawStationMarkers();
     rebuildStationList();
@@ -2240,7 +2266,7 @@ function goToCapital() {
   document.getElementById('stateSelect').value = code;
   refreshCharts().catch(() => {});
   initMap();
-  map.setView([c.lat, c.lng], 12);
+  map.setView([c.lat, c.lng], MIN_ZOOM_STATIONS);
   updateMapZoomHint();
   fetchStationsAround(c.lat, c.lng, { recenter: false });
 }
