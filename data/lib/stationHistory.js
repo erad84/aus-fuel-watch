@@ -367,6 +367,7 @@ module.exports = {
   catalogPath,
   dayPath,
   loadCatalog,
+  saveCatalog,
   loadDay,
   dayToMap,
   isDayEmpty,
