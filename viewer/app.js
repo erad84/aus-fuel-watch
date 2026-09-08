@@ -65,8 +65,6 @@ let selectedStationId = null;
 let stationFetchTimer = null;
 let stationFetchInFlight = false;
 const MIN_ZOOM_STATIONS = 11;
-const MAX_STATIONS_PER_REQUEST = 50;
-const MAX_RADIUS_M = 25000;
 /** @type {Record<string, {date: string, prices: Record<string, number>}>} */
 const stationSnapshots = {};
 
@@ -74,6 +72,7 @@ const stationSnapshots = {};
 const publishedStationCache = {
   catalogs: /** @type {Record<string, object>} */ ({}),
   days: /** @type {Record<string, object>} */ ({}),
+  latestDay: /** @type {Record<string, string>} */ ({}),
 };
 /** @type {{ state: string, publishedId: string, byDate: Map<string, number>, daysLoaded: number } | null} */
 let selectedPublishedHistory = null;
@@ -1106,7 +1105,9 @@ async function loadPublishedHistoryForStation(st, labels, fuel) {
 
   const catalog = await loadPublishedCatalog(state);
   if (!catalog) return null;
-  const publishedId = matchPublishedStationId(st, catalog);
+  const publishedId = catalog.stations?.[st.id]
+    ? st.id
+    : matchPublishedStationId(st, catalog);
   if (!publishedId) return null;
 
   const byDate = new Map();
@@ -1701,9 +1702,130 @@ function scheduleStationFetch() {
   if (!map || map.getZoom() < MIN_ZOOM_STATIONS) return;
   clearTimeout(stationFetchTimer);
   stationFetchTimer = setTimeout(() => {
-    const c = map.getCenter();
-    fetchStationsAround(c.lat, c.lng, { fromViewport: true });
+    fetchPublishedStationsInView({ fromViewport: true });
   }, 450);
+}
+
+/** Nearest capital state, plus any capital inside a padded viewport. */
+function statesForMapView() {
+  if (!map) return [];
+  const c = map.getCenter();
+  let best = null;
+  let bestKm = Infinity;
+  for (const [code, cap] of Object.entries(CAPITALS)) {
+    const km = haversineKm(c.lat, c.lng, cap.lat, cap.lng);
+    if (km < bestKm) {
+      bestKm = km;
+      best = code;
+    }
+  }
+  const out = new Set();
+  if (best) out.add(best);
+  const selected = document.getElementById('stateSelect')?.value;
+  if (selected) out.add(selected);
+  const bounds = map.getBounds().pad(0.2);
+  for (const [code, cap] of Object.entries(CAPITALS)) {
+    if (bounds.contains([cap.lat, cap.lng])) out.add(code);
+  }
+  return [...out];
+}
+
+async function resolveLatestStationDay(state) {
+  if (publishedStationCache.latestDay[state]) return publishedStationCache.latestDay[state];
+  const candidates = [];
+  const file = stateFiles[state];
+  if (file?.start && file.days) {
+    const start = isoToDayNum(file.start);
+    for (let i = file.days - 1; i >= Math.max(0, file.days - 21); i--) {
+      candidates.push(dayNumToISO(start + i));
+    }
+  }
+  const today = new Date();
+  for (let d = 0; d < 10; d++) {
+    const dt = new Date(today.getTime() - d * DAY_MS);
+    const iso = dt.toISOString().slice(0, 10);
+    if (!candidates.includes(iso)) candidates.push(iso);
+  }
+  for (const iso of candidates) {
+    const day = await loadPublishedDay(state, iso);
+    if (day && ((day.s && day.s.length) || (day.stations && Object.keys(day.stations).length))) {
+      publishedStationCache.latestDay[state] = iso;
+      return iso;
+    }
+  }
+  return null;
+}
+
+function publishedDayPriceMap(dayFile) {
+  const map = new Map();
+  if (!dayFile) return map;
+  if (dayFile.stations && typeof dayFile.stations === 'object' && !Array.isArray(dayFile.stations)) {
+    for (const [id, prices] of Object.entries(dayFile.stations)) map.set(id, prices);
+    return map;
+  }
+  for (const row of dayFile.s || []) {
+    if (Array.isArray(row) && row.length >= 2) map.set(row[0], row[1]);
+  }
+  return map;
+}
+
+const PM_TYPE_FOR_FUEL = {
+  U91: 'ULP',
+  E10: 'E10',
+  P95: 'PULP95',
+  P98: 'PULP98',
+  DSL: 'DIESEL',
+  PDSL: 'PDIESEL',
+};
+
+function stationFromPublished(id, meta, pricesTenths, state) {
+  if (!meta || meta.lat == null || meta.lng == null) return null;
+  const lat = Number(meta.lat);
+  const lng = Number(meta.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const prices = {};
+  const fuels = [];
+  for (const [fuel, tenths] of Object.entries(pricesTenths || {})) {
+    if (tenths == null || !Number.isFinite(Number(tenths))) continue;
+    const cents = Number(tenths) / 10;
+    prices[fuel] = cents;
+    fuels.push({
+      type: PM_TYPE_FOR_FUEL[fuel] || fuel,
+      name: FUEL_LABELS[fuel] || fuel,
+      price: cents,
+    });
+  }
+  return {
+    id,
+    name: meta.name || '',
+    brand: meta.brand || '',
+    address: meta.address || '',
+    suburb: meta.suburb || '',
+    postcode: meta.postcode != null ? meta.postcode : null,
+    state: state || meta.state || '',
+    lat,
+    lng,
+    prices,
+    fuels,
+    loaded: true,
+    source: 'published',
+  };
+}
+
+async function loadPublishedStationsForState(state) {
+  const catalog = await loadPublishedCatalog(state);
+  if (!catalog?.stations) return { stations: [], dayIso: null };
+  const dayIso = await resolveLatestStationDay(state);
+  if (!dayIso) return { stations: [], dayIso: null };
+  const day = await loadPublishedDay(state, dayIso);
+  const priceMap = publishedDayPriceMap(day);
+  const stations = [];
+  for (const [id, prices] of priceMap) {
+    const meta = catalog.stations[id];
+    const st = stationFromPublished(id, meta, prices, state);
+    if (st) stations.push(st);
+  }
+  return { stations, dayIso };
 }
 
 function pmFuelType(fuel) {
@@ -1711,8 +1833,11 @@ function pmFuelType(fuel) {
 }
 
 function stationFuelPrice(station, fuel) {
+  if (station?.prices && station.prices[fuel] != null && Number.isFinite(station.prices[fuel])) {
+    return station.prices[fuel];
+  }
   const pm = pmFuelType(fuel);
-  const row = station.fuels?.find((f) => f.type === pm);
+  const row = station?.fuels?.find((f) => f.type === pm);
   return row?.price ?? null;
 }
 
@@ -1782,12 +1907,26 @@ function mergeStationsIntoCache(stations, markLoaded) {
 function stationsInMapBounds() {
   if (!map) return [];
   const bounds = map.getBounds();
+  const fuel = document.getElementById('fuelSelect')?.value;
+  const center = map.getCenter();
   const out = [];
   for (const st of stationCache.values()) {
     if (!st.lat || !st.lng) continue;
-    if (bounds.contains([st.lat, st.lng])) out.push(st);
+    if (bounds.contains([st.lat, st.lng])) {
+      out.push({
+        ...st,
+        distance_m: Math.round(haversineKm(center.lat, center.lng, st.lat, st.lng) * 1000),
+      });
+    }
   }
-  out.sort((a, b) => (a.distance_m || 0) - (b.distance_m || 0));
+  out.sort((a, b) => {
+    const pa = stationFuelPrice(a, fuel);
+    const pb = stationFuelPrice(b, fuel);
+    if (pa != null && pb != null && pa !== pb) return pa - pb;
+    if (pa != null && pb == null) return -1;
+    if (pa == null && pb != null) return 1;
+    return (a.distance_m || 0) - (b.distance_m || 0);
+  });
   return out;
 }
 
@@ -1825,7 +1964,6 @@ function redrawStationMarkers() {
   for (const st of stationCache.values()) {
     if (!st.lat || !st.lng || !bounds.contains([st.lat, st.lng])) continue;
     visible.push(st);
-    if (visible.length >= MAX_STATIONS_PER_REQUEST * 2) break;
   }
 
   let min = Infinity;
@@ -1862,25 +2000,24 @@ function redrawStationMarkers() {
 
 function onStationPinClick(station) {
   selectStationById(station.id);
-  fetchStationsAround(station.lat, station.lng, {
-    anchorId: station.id,
-    recenter: true,
-  });
 }
 
 async function fetchStationsAround(lat, lng, opts = {}) {
   initMap();
+  if (opts.recenter && Number.isFinite(lat) && Number.isFinite(lng)) {
+    map.setView([lat, lng], Math.max(map.getZoom(), 12));
+  }
+  return fetchPublishedStationsInView(opts);
+}
+
+async function fetchPublishedStationsInView(opts = {}) {
+  initMap();
   if (map.getZoom() < MIN_ZOOM_STATIONS && opts.fromViewport) return;
 
-  const qs = `lat=${lat}&lng=${lng}&radius=${MAX_RADIUS_M}&limit=${MAX_STATIONS_PER_REQUEST}`;
   const list = document.getElementById('stationList');
-
+  const states = statesForMapView();
   if (!opts.silent) {
-    setStatus(`Loading stations within 25 km of ${lat.toFixed(3)}, ${lng.toFixed(3)}…`);
-  }
-
-  if (!stationFetchInFlight) {
-    redrawStationMarkers();
+    setStatus(`Loading published stations for ${states.join(', ') || 'map'}…`);
   }
 
   stationFetchInFlight = true;
@@ -1890,19 +2027,31 @@ async function fetchStationsAround(lat, lng, opts = {}) {
   }
 
   try {
-    const data = await fetchPetrolmate('area', qs);
-    mergeStationsIntoCache(data.stations || [], true);
-    if (opts.recenter) {
-      map.setView([lat, lng], Math.max(map.getZoom(), 12));
+    const results = await Promise.all(states.map((st) => loadPublishedStationsForState(st)));
+    let added = 0;
+    const days = [];
+    for (const { stations, dayIso } of results) {
+      if (dayIso) days.push(dayIso);
+      mergeStationsIntoCache(stations, true);
+      added += stations.length;
+    }
+    if (opts.recenter && opts.lat != null && opts.lng != null) {
+      map.setView([opts.lat, opts.lng], Math.max(map.getZoom(), 12));
     }
     redrawStationMarkers();
     rebuildStationList();
     if (!opts.silent) {
+      const inView = stationsInMapBounds().length;
+      const dayNote = days.length ? ` · prices ${[...new Set(days)].join(', ')}` : '';
       setStatus(
-        `Showing ${stationsInMapBounds().length} stations in view (${stationCache.size} cached in area).`
+        `Showing ${inView} stations in view (${stationCache.size} loaded${dayNote}).`
       );
     }
     if (opts.anchorId) selectStationById(opts.anchorId);
+    if (!added && !opts.fromViewport) {
+      list.innerHTML =
+        '<div class="station-item">No published stations with coordinates for this area.</div>';
+    }
   } catch (err) {
     if (!opts.fromViewport) {
       list.innerHTML = `<div class="station-item">Failed: ${err.message}</div>`;
@@ -1961,15 +2110,25 @@ function renderSelectedStationDetail(st) {
 
   const lines = [
     `<strong>${escapeHtml(st.brand || '')} ${escapeHtml(st.name || '')}</strong>`,
-    `${escapeHtml(st.address || '')}, ${escapeHtml(st.suburb || '')} ${escapeHtml(st.state || '')}`,
+    `${escapeHtml(st.address || '')}${st.suburb ? `, ${escapeHtml(st.suburb)}` : ''} ${escapeHtml(st.state || '')}`,
+    st.source === 'published' ? '<p class="hint">Source: published station history</p>' : '',
     st.distance_m != null ? `Distance: ${st.distance_m}m` : '',
     '<table style="width:100%;margin-top:0.5rem"><tr><th>Fuel</th><th>c/L</th></tr>',
   ];
   const priceMap = {};
-  for (const f of st.fuels || []) {
-    const canon = petrolmateFuelToCanon(f.type);
-    priceMap[canon] = f.price;
-    lines.push(`<tr><td>${escapeHtml(f.name || f.type)}</td><td>${f.price?.toFixed(1) ?? '—'}</td></tr>`);
+  if (st.prices && Object.keys(st.prices).length) {
+    for (const [canon, price] of Object.entries(st.prices)) {
+      priceMap[canon] = price;
+      lines.push(
+        `<tr><td>${escapeHtml(FUEL_LABELS[canon] || canon)}</td><td>${price?.toFixed(1) ?? '—'}</td></tr>`
+      );
+    }
+  } else {
+    for (const f of st.fuels || []) {
+      const canon = petrolmateFuelToCanon(f.type);
+      priceMap[canon] = f.price;
+      lines.push(`<tr><td>${escapeHtml(f.name || f.type)}</td><td>${f.price?.toFixed(1) ?? '—'}</td></tr>`);
+    }
   }
   lines.push('</table>');
 
