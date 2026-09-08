@@ -4,8 +4,8 @@
 //
 // Fetches station-level prices from official adapters, aggregates to state and
 // capital-metro averages, and falls back to Petrolmate /api/summary only for
-// jurisdictions without a station source yet (VIC). Also records per-station
-// daily prices under docs/v1/stations/ (separate from phone-facing aggregates).
+// jurisdictions without a station source. Also records per-station daily prices
+// under docs/v1/stations/ (separate from phone-facing aggregates).
 //
 // Writes are idempotent and only ever fill an empty slot.
 //

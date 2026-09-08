@@ -29,10 +29,10 @@ zip container by hand and inflates with Node's built-in `zlib`.
 `data/collect.js` runs on a schedule, fetches **station-level prices** from official
 government adapters where available, aggregates them to capital-metro and state-wide
 averages, records per-station daily boards under `docs/v1/stations/`, and falls back
-to Petrolmate `/api/summary` only for Victoria until Servo Saver credentials exist.
+to Petrolmate `/api/summary` only for jurisdictions that still lack a station source.
 South Australia uses SAFPIS (`SA_FUEL_TOKEN`); Queensland uses Fuel Prices QLD
-(`QLD_FUEL_TOKEN`); NSW, ACT and Tasmania use NSW FuelCheck; WA uses FuelWatch RSS;
-NT uses MyFuel NT.
+(`QLD_FUEL_TOKEN`); Victoria uses Servo Saver open data (`VIC_FUEL_API_KEY`);
+NSW, ACT and Tasmania use NSW FuelCheck; WA uses FuelWatch RSS; NT uses MyFuel NT.
 Days that roll out of the window are written to `docs/v1/archive/YYYY-MM.json` first
 (aggregates) and `docs/v1/stations/archive/` (station shards).
 
@@ -98,8 +98,8 @@ applies per site.
 ## Data sources and attribution
 
 **Live and historical prices** come from official government feeds where available
-(NSW FuelCheck, SAFPIS, Fuel Prices Queensland, WA FuelWatch, NT MyFuel), with Petrolmate
-`/api/summary` as a state-wide fallback for VIC until its open-data key is in place.
+(NSW FuelCheck, SAFPIS, Fuel Prices Queensland, WA FuelWatch, NT MyFuel, VIC Servo Saver),
+with Petrolmate `/api/summary` as a state-wide fallback when a station adapter is unavailable.
 Attribution for each source appears in the published data files and in app settings.
 
 ## Credentials
@@ -110,8 +110,11 @@ the repository. Copy `.env.example` to `.env` and fill in what you have; `.env` 
 | Variable | Covers | Register at |
 | --- | --- | --- |
 | `FUELCHECK_API_KEY` / `FUELCHECK_API_SECRET` | NSW, ACT, TAS | [api.nsw.gov.au](https://api.nsw.gov.au/Product/Index/22), free, 2500 calls/month |
+| `QLD_FUEL_TOKEN` | QLD | [fuelpricesqld.com.au](https://www.fuelpricesqld.com.au/) |
+| `SA_FUEL_TOKEN` | SA | [SAFPIS publishers](https://www.safuelpricinginformation.com.au/publishers.html) |
+| `VIC_FUEL_API_KEY` | VIC | [Servo Saver Public API](https://service.vic.gov.au/find-services/transport-and-driving/servo-saver/help-centre/servo-saver-public-api) |
 
-Western Australia's FuelWatch feed needs no credentials. The collector fails with an explicit
+Western Australia's FuelWatch feed and NT MyFuel need no credentials. The collector fails with an explicit
 message when a required credential is missing, rather than quietly publishing an empty day.
 
 Node 22 loads the file natively, so the pipeline stays dependency-free — there is no `dotenv`.

@@ -13,9 +13,10 @@ Settings → Secrets and variables → Actions → New repository secret:
 | `FUELCHECK_API_SECRET` | same registration |
 | `SA_FUEL_TOKEN` | [SAFPIS publishers](https://www.safuelpricinginformation.com.au/publishers.html) |
 | `QLD_FUEL_TOKEN` | [Fuel Prices QLD](https://www.fuelpricesqld.com.au/) |
+| `VIC_FUEL_API_KEY` | [Servo Saver Public API](https://service.vic.gov.au/find-services/transport-and-driving/servo-saver/help-centre/servo-saver-public-api) (`x-consumer-id`) |
 
-WA FuelWatch and NT MyFuel need no credentials. VIC falls back to Petrolmate until
-`VIC_FUEL_API_KEY` exists.
+WA FuelWatch and NT MyFuel need no credentials. Without `VIC_FUEL_API_KEY`, VIC
+falls back to Petrolmate state averages.
 
 `GITHUB_TOKEN` is provided automatically and is used to push the `data` branch.
 

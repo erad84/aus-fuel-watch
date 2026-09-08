@@ -22,6 +22,7 @@ const fuelwatch = require('./fuelwatch');
 const myfuelnt = require('./myfuelnt');
 const safpis = require('./safpis');
 const fuelpricesqld = require('./fuelpricesqld');
+const servosaver = require('./servosaver');
 
 // Keyed by the jurisdictions each one authoritatively covers.
 const STATION_SOURCES = {
@@ -30,6 +31,7 @@ const STATION_SOURCES = {
   [myfuelnt.NAME]: myfuelnt,
   [safpis.NAME]: safpis,
   [fuelpricesqld.NAME]: fuelpricesqld,
+  [servosaver.NAME]: servosaver,
 };
 
 const SNAPSHOT_SOURCES = { [petrolmate.NAME]: petrolmate };
@@ -37,7 +39,7 @@ const SNAPSHOT_SOURCES = { [petrolmate.NAME]: petrolmate };
 const SOURCES = { ...STATION_SOURCES, ...SNAPSHOT_SOURCES };
 const DEFAULT_SOURCE = petrolmate.NAME;
 
-// Which adapter owns which jurisdiction. VIC still needs Servo Saver credentials.
+// Which adapter owns which jurisdiction.
 const BY_STATE = {
   NSW: fuelcheck.NAME,
   ACT: fuelcheck.NAME,
@@ -46,6 +48,7 @@ const BY_STATE = {
   NT: myfuelnt.NAME,
   SA: safpis.NAME,
   QLD: fuelpricesqld.NAME,
+  VIC: servosaver.NAME,
 };
 
 function get(name) {

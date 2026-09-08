@@ -64,6 +64,7 @@ jobs:
           FUELCHECK_API_SECRET: ${{ secrets.FUELCHECK_API_SECRET }}
           SA_FUEL_TOKEN: ${{ secrets.SA_FUEL_TOKEN }}
           QLD_FUEL_TOKEN: ${{ secrets.QLD_FUEL_TOKEN }}
+          VIC_FUEL_API_KEY: ${{ secrets.VIC_FUEL_API_KEY }}
         run: |
           if [ "${{ github.event.schedule }}" = "7 6 * * *" ] || [ "${{ inputs.catchup }}" = "true" ]; then
             node data/collect.js --catchup
