@@ -76,6 +76,8 @@ const publishedStationCache = {
 };
 /** @type {{ state: string, publishedId: string, byDate: Map<string, number>, daysLoaded: number } | null} */
 let selectedPublishedHistory = null;
+/** @type {{ mean: (number|null)[], low: (number|null)[], high: (number|null)[], peerCount: number, radiusKm: number } | null} */
+let selectedAreaSeries = null;
 
 /** Series + params for chart hover → cycle dial sync */
 let chartCycleCtx = {
@@ -990,6 +992,83 @@ function selectedStationChartOverlay(labels, fuel) {
   return { label, data, showLine: n >= 2, pointCount: n };
 }
 
+const AREA_RADIUS_KM = 15;
+const STATION_LINE_COLOR = '#ef4444';
+const AREA_MEAN_COLOR = '#fca5a5';
+const AREA_BAND_COLOR = '#fda4af';
+
+/** Stations in catalog within radiusKm of center (includes center when it has coords). */
+function peerIdsWithinKm(catalog, centerLat, centerLng, radiusKm) {
+  const ids = [];
+  if (!catalog?.stations) return ids;
+  for (const [id, meta] of Object.entries(catalog.stations)) {
+    if (meta?.lat == null || meta?.lng == null) continue;
+    const lat = Number(meta.lat);
+    const lng = Number(meta.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (haversineKm(centerLat, centerLng, lat, lng) <= radiusKm) ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * Daily mean / low / high for published stations within radius of the selected station.
+ */
+async function loadAreaSeriesAroundStation(st, labels, fuel, radiusKm = AREA_RADIUS_KM) {
+  const state =
+    st.state ||
+    document.getElementById('stateSelect')?.value ||
+    chartCycleCtx.state;
+  if (!state || !labels?.length || st.lat == null || st.lng == null) return null;
+
+  const catalog = await loadPublishedCatalog(state);
+  if (!catalog) return null;
+  const peerIds = peerIdsWithinKm(catalog, Number(st.lat), Number(st.lng), radiusKm);
+  if (peerIds.length < 1) return null;
+
+  const uniqueDates = [...new Set(labels.filter(Boolean))];
+  const concurrency = 8;
+  for (let i = 0; i < uniqueDates.length; i += concurrency) {
+    const chunk = uniqueDates.slice(i, i + concurrency);
+    await Promise.all(chunk.map((iso) => loadPublishedDay(state, iso)));
+  }
+
+  const mean = [];
+  const low = [];
+  const high = [];
+  for (const iso of labels) {
+    const day = publishedStationCache.days[`${state}|${iso}`];
+    const vals = [];
+    if (day) {
+      for (const id of peerIds) {
+        const tenths = pricesFromPublishedDay(day, id)?.[fuel];
+        if (tenths != null && Number.isFinite(tenths)) vals.push(tenths / 10);
+      }
+    }
+    if (!vals.length) {
+      mean.push(null);
+      low.push(null);
+      high.push(null);
+      continue;
+    }
+    let sum = 0;
+    let mn = vals[0];
+    let mx = vals[0];
+    for (const v of vals) {
+      sum += v;
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+    }
+    mean.push(Math.round((sum / vals.length) * 10) / 10);
+    low.push(mn);
+    high.push(mx);
+  }
+
+  const daysWithData = mean.filter((v) => v != null).length;
+  if (!daysWithData) return null;
+  return { mean, low, high, peerCount: peerIds.length, radiusKm, daysWithData };
+}
+
 async function loadPublishedCatalog(state) {
   if (!state) return null;
   if (publishedStationCache.catalogs[state]) return publishedStationCache.catalogs[state];
@@ -1228,9 +1307,13 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
   const turns = marks?.turns || [];
   const fftCurve = marks?.fftOverlay?.curve;
   const stationOverlay = selectedStationChartOverlay(labels, fuel);
+  const areaSeries = selectedAreaSeries;
   const extraForBounds = [];
   if (fftCurve) extraForBounds.push(fftCurve);
   if (stationOverlay) extraForBounds.push(stationOverlay.data);
+  if (areaSeries?.mean) extraForBounds.push(areaSeries.mean);
+  if (areaSeries?.low) extraForBounds.push(areaSeries.low);
+  if (areaSeries?.high) extraForBounds.push(areaSeries.high);
   const yBounds = yBoundsFromVisible(citySeries, vis, extraForBounds.length ? extraForBounds : null);
 
   const pointStyle = {
@@ -1341,12 +1424,56 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
     });
   }
 
+  if (areaSeries?.mean?.length) {
+    datasets.push({
+      label: `Area mean (${areaSeries.radiusKm} km, n≈${areaSeries.peerCount})`,
+      data: areaSeries.mean,
+      borderColor: AREA_MEAN_COLOR,
+      backgroundColor: AREA_MEAN_COLOR,
+      borderWidth: 2,
+      tension: 0.2,
+      fill: false,
+      spanGaps: true,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointHitRadius: 8,
+    });
+    datasets.push({
+      label: 'Area low',
+      data: areaSeries.low,
+      borderColor: AREA_BAND_COLOR,
+      backgroundColor: AREA_BAND_COLOR,
+      borderDash: [4, 3],
+      borderWidth: 1.5,
+      tension: 0.2,
+      fill: false,
+      spanGaps: true,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      pointHitRadius: 6,
+    });
+    datasets.push({
+      label: 'Area high',
+      data: areaSeries.high,
+      borderColor: AREA_BAND_COLOR,
+      backgroundColor: AREA_BAND_COLOR,
+      borderDash: [4, 3],
+      borderWidth: 1.5,
+      tension: 0.2,
+      fill: false,
+      spanGaps: true,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      pointHitRadius: 6,
+    });
+  }
+
   if (stationOverlay) {
     datasets.push({
       label: stationOverlay.label,
       data: stationOverlay.data,
-      borderColor: '#ef4444',
-      backgroundColor: '#ef4444',
+      borderColor: STATION_LINE_COLOR,
+      backgroundColor: STATION_LINE_COLOR,
       borderWidth: 2,
       tension: 0.2,
       fill: false,
@@ -1355,7 +1482,7 @@ function renderHistoryChart(labels, citySeries, statePoint, fuel, title, state, 
       pointRadius: (ctx) => (ctx.raw != null ? 5 : 0),
       pointHoverRadius: 7,
       pointHitRadius: 12,
-      pointBackgroundColor: '#ef4444',
+      pointBackgroundColor: STATION_LINE_COLOR,
       pointBorderColor: '#fecaca',
       pointBorderWidth: 1,
     });
@@ -2103,6 +2230,14 @@ async function selectStationById(id) {
   if (!st) return;
   selectedStationId = id;
   selectedPublishedHistory = null;
+  selectedAreaSeries = null;
+
+  if (map && st.lat != null && st.lng != null && Number.isFinite(Number(st.lat)) && Number.isFinite(Number(st.lng))) {
+    initMap();
+    const z = Math.max(map.getZoom(), MIN_ZOOM_STATIONS);
+    map.setView([Number(st.lat), Number(st.lng)], z);
+  }
+
   redrawStationMarkers();
   rebuildStationList();
   renderSelectedStationDetail(st);
@@ -2116,12 +2251,25 @@ async function selectStationById(id) {
     console.warn('Published station history:', err.message);
     selectedPublishedHistory = null;
   }
+  try {
+    selectedAreaSeries = await loadAreaSeriesAroundStation(st, labels, fuel);
+  } catch (err) {
+    console.warn('Area series:', err.message);
+    selectedAreaSeries = null;
+  }
 
   if (selectedPublishedHistory?.daysLoaded) {
     const detail = document.getElementById('stationDetail');
     if (detail) {
       detail.innerHTML +=
         `<p class="hint">Published history: ${selectedPublishedHistory.daysLoaded} day(s) matched in catalog.</p>`;
+    }
+  }
+  if (selectedAreaSeries?.peerCount) {
+    const detail = document.getElementById('stationDetail');
+    if (detail) {
+      detail.innerHTML +=
+        `<p class="hint">Area band: ${selectedAreaSeries.peerCount} station(s) within ${selectedAreaSeries.radiusKm}&nbsp;km (mean / low / high on chart).</p>`;
     }
   }
 

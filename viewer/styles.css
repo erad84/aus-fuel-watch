@@ -468,6 +468,14 @@ button:hover { filter: brightness(1.08); }
   color: #111;
   border-color: #c9a227;
 }
+.station-marker.active .marker-price {
+  border: 3px solid #a855f7;
+  box-shadow: 0 0 0 1px #a855f7, 0 2px 8px rgba(168, 85, 247, 0.45);
+}
+.station-marker.cheapest.active .marker-price {
+  border: 3px solid #a855f7;
+  box-shadow: 0 0 0 1px #a855f7, 0 2px 8px rgba(168, 85, 247, 0.45);
+}
 .marker-pin-wrap { display: flex; flex-direction: column; align-items: center; }
 .marker-pin-head {
   width: 30px;
@@ -510,12 +518,12 @@ button:hover { filter: brightness(1.08); }
   border-top: 10px solid #e8c547;
 }
 .station-marker.active .marker-pin-head {
-  border-color: #f59e0b;
-  box-shadow: 0 0 0 2px #f59e0b;
+  border-color: #a855f7;
+  box-shadow: 0 0 0 2px #a855f7;
 }
 .station-marker.cheapest.active .marker-pin-head {
   border-color: #fff;
-  box-shadow: 0 0 0 2px #e8c547, 0 0 0 4px #f59e0b;
+  box-shadow: 0 0 0 2px #e8c547, 0 0 0 4px #a855f7;
 }
 
 footer {
