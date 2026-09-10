@@ -10,7 +10,7 @@
 <body>
   <header>
     <h1>Aus Fuel Watch</h1>
-    <p class="subtitle">Collected price history + live station map</p>
+    <p class="subtitle">Collected price history + published station map</p>
   </header>
 
   <section class="panel controls">
@@ -43,17 +43,43 @@
         <option value="LPG">LPG</option>
       </select>
     </label>
-    <label class="checkbox">
-      <input id="overlaySummary" type="checkbox" />
-      Overlay state-wide snapshot (Petrolmate live)
+    <label class="suburb-field controls-suburb-field">
+      Postcode / suburb
+      <div class="suburb-combo">
+        <input
+          id="suburbSearch"
+          type="text"
+          class="suburb-combo-input"
+          placeholder="Type postcode or suburb…"
+          autocomplete="off"
+          spellcheck="false"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded="false"
+          aria-controls="suburbSuggest"
+          title="Suburb centre — mean/low/high within radius"
+        />
+        <button
+          type="button"
+          id="suburbComboToggle"
+          class="suburb-combo-toggle"
+          tabindex="-1"
+          aria-label="Open suburb list"
+        ></button>
+        <div id="suburbSuggest" class="suburb-suggest hidden" role="listbox"></div>
+      </div>
     </label>
-    <label>
-      Station proxy
-      <input id="stationProxy" type="url" placeholder="auto via serve.mjs" />
+    <label class="area-radius-row">
+      <span>Radius (km)</span>
+      <input id="areaRadius" type="number" min="1" max="100" step="1" value="15" title="km around suburb centre for mean / band" />
+    </label>
+    <label class="checkbox exclude-costco-label" title="Costco requires membership to purchase">
+      <input id="excludeCostco" type="checkbox" />
+      Exclude Costco
     </label>
   </section>
 
-  <section class="panel" id="statusBar">Ready — set data URL and click Load data.</section>
+  <section class="panel" id="statusBar">Loading data…</section>
 
   <section class="grid-history">
     <div class="panel panel-chart">
@@ -68,20 +94,39 @@
               <option value="90" selected>90 days</option>
             </select>
           </label>
+        </div>
+      </div>
+      <details class="tune-fold" id="graphViewFold">
+        <summary>Graph view</summary>
+        <div class="graph-view-body">
           <label>
             Cycle model
             <select id="cycleModelSelect"></select>
           </label>
           <div class="line-toggles" role="group" aria-label="Visible series">
-            <label class="checkbox"><input id="showAvg" type="checkbox" checked /> Mean</label>
-            <label class="checkbox"><input id="showGmean" type="checkbox" /> Geomean</label>
-            <label class="checkbox"><input id="showMode" type="checkbox" /> Mode</label>
-            <label class="checkbox"><input id="showMed" type="checkbox" /> Median</label>
-            <label class="checkbox"><input id="showMin" type="checkbox" /> Daily low</label>
-            <label class="checkbox"><input id="showMax" type="checkbox" /> Daily high</label>
+            <label class="checkbox"><input id="showAvg" type="checkbox" checked /> State mean</label>
+            <label class="checkbox"><input id="showGmean" type="checkbox" /> State geomean</label>
+            <label class="checkbox"><input id="showMode" type="checkbox" /> State mode</label>
+            <label class="checkbox"><input id="showMed" type="checkbox" /> State median</label>
+            <label class="checkbox"><input id="showMin" type="checkbox" checked /> State low</label>
+            <label class="checkbox"><input id="showMax" type="checkbox" checked /> State high</label>
+            <label class="checkbox"><input id="showAreaMean" type="checkbox" checked /> Suburb mean</label>
+            <label class="checkbox"><input id="showAreaLow" type="checkbox" checked /> Suburb low</label>
+            <label class="checkbox"><input id="showAreaHigh" type="checkbox" checked /> Suburb high</label>
+            <label class="checkbox"><input id="showFavMean" type="checkbox" checked /> Favourites mean</label>
+            <label class="checkbox"><input id="showFavLow" type="checkbox" checked /> Favourites low</label>
+            <label class="checkbox"><input id="showFavHigh" type="checkbox" checked /> Favourites high</label>
+            <label class="checkbox"><input id="showStation" type="checkbox" checked /> Station</label>
+            <label class="checkbox" title="Singapore Mogas 95 (petrol) or Gasoil (diesel) from curated AIP/ACCC outlook.json"><input id="showMogas" type="checkbox" checked /> Singapore Mogas / Gasoil</label>
+          </div>
+          <div class="line-toggles turn-line-toggles" role="group" aria-label="Turn lines">
+            <label class="checkbox"><input id="showStateTurns" type="checkbox" checked /> State turns</label>
+            <label class="checkbox"><input id="showSuburbTurns" type="checkbox" checked /> Suburb turns</label>
+            <label class="checkbox"><input id="showFavTurns" type="checkbox" checked /> Favourites turns</label>
+            <label class="checkbox"><input id="showStationTurns" type="checkbox" checked /> Station turns</label>
           </div>
         </div>
-      </div>
+      </details>
       <details class="tune-fold" id="turnDetectFold">
         <summary>Turn detection</summary>
         <div id="turnDetectTune" class="turn-detect-tune">
@@ -122,9 +167,15 @@
       <div class="chart-wrap"><canvas id="historyChart"></canvas></div>
     </div>
     <div class="panel panel-summary">
-      <h2>Summary</h2>
-      <div id="summaryCards" class="cards"></div>
-      <div id="cycleStages" class="cycle-stages"></div>
+      <h2 id="summaryTitle" class="summary-heading summary-heading-state">Summary</h2>
+      <p class="hint" id="stateSummaryHint"></p>
+      <div class="cycle-dials scope-only-dial">
+        <div class="cycle-dial-col">
+          <h3 id="scopeCycleHeading" class="cycle-dial-heading">Scope cycle</h3>
+          <div id="cycleStages" class="cycle-stages"></div>
+        </div>
+      </div>
+      <div id="outlookBar" class="outlook-bar-mount"></div>
       <details id="arcpathTune" class="tune-fold arcpath-tune hidden">
         <summary>Dial adjustments</summary>
         <div class="arcpath-tune-body">
@@ -157,7 +208,34 @@
           <button id="tuneArcpathReset" type="button" class="btn-secondary">Reset defaults</button>
         </div>
       </details>
+      <div id="summaryCards" class="cards"></div>
       <div id="e10Compare" class="e10-box hidden"></div>
+      <div id="stateRankBars"></div>
+    </div>
+
+    <div class="panel panel-area-summary" id="areaSummaryPanel">
+      <h2 id="areaSummaryTitle" class="summary-heading summary-heading-suburb">Suburb summary</h2>
+      <p class="hint" id="areaSummaryHint">Type a postcode or suburb to centre the suburb band.</p>
+      <div class="cycle-dials area-only-dial">
+        <div class="cycle-dial-col">
+          <h3 class="cycle-dial-heading">Suburb cycle</h3>
+          <div id="areaCycleStages" class="cycle-stages"></div>
+        </div>
+      </div>
+      <div id="areaSummaryCards" class="cards"></div>
+      <div id="areaE10Compare" class="e10-box hidden"></div>
+      <div id="areaRankBars"></div>
+    </div>
+
+    <div class="panel panel-fav-stations-summary" id="favStationsSummaryPanel">
+      <h2 class="summary-heading summary-heading-favourites">Favourites Summary</h2>
+      <p class="hint" id="favSummaryHint"></p>
+      <div id="favStationsSummary" class="cards fav-stations-summary-body"></div>
+    </div>
+
+    <div class="panel panel-station-summary">
+      <h2 class="summary-heading summary-heading-station">Station summary</h2>
+      <div id="stationSummary" class="cards station-summary-body"></div>
     </div>
   </section>
 
@@ -183,6 +261,8 @@
         </div>
       </div>
       <div class="stations-side">
+        <h3>Favourites</h3>
+        <div id="favouritesList" class="favourites-list"></div>
         <h3>Stations</h3>
         <div id="stationList" class="station-list"></div>
       </div>
@@ -201,15 +281,17 @@
   </section>
 
   <footer>
-  Run <code>node viewer/serve.mjs</code> then open <code>http://localhost:3456</code>
-  (includes Petrolmate proxy — required for stations). Local JSON:
-  <code>http://localhost:3456/docs/v1/</code>
+  Run <code>node viewer/serve.mjs</code> then open <code>http://localhost:3456</code>.
+  Local JSON: <code>http://localhost:3456/docs/v1/</code>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="brands.js"></script>
   <script src="cycleModels.js"></script>
+  <script src="userPrefs.js"></script>
+  <script src="au-suburbs-data.js"></script>
+  <script src="outlook-data.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

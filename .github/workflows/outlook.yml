@@ -1,0 +1,85 @@
+name: outlook
+
+# Weekly AIP Argus Mogas 95 / Gasoil refresh → data branch (Pages) + main embed.
+
+on:
+  schedule:
+    # Tuesday 06:00 AEST → Monday 20:00 UTC (AIP usually posts Mon/Tue)
+    - cron: '0 20 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: outlook
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  outlook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Check out data branch
+        continue-on-error: true
+        id: checkout_data
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          path: docs
+
+      - name: Bootstrap data branch workspace
+        if: steps.checkout_data.outcome != 'success'
+        run: |
+          mkdir -p docs/v1
+          cd docs
+          git init -b data
+          git config user.name 'aus-fuel-watch-bot'
+          git config user.email 'actions@users.noreply.github.com'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fetch AIP outlook
+        run: node data/seed/fetch-aip-outlook.js
+
+      - name: Commit and push data branch
+        working-directory: docs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name 'aus-fuel-watch-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          if ! git remote get-url origin 2>/dev/null; then
+            git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          if [ -z "$(git status --porcelain)" ]; then
+            echo 'no change on data branch'
+          else
+            git add -A
+            git commit -m "outlook: $(date -u +%Y-%m-%d) AIP refresh"
+            for attempt in 1 2 3; do
+              if git push -u origin HEAD:data; then break; fi
+              git pull --rebase origin data || exit 1
+              if [ "$attempt" -eq 3 ]; then exit 1; fi
+            done
+          fi
+
+      - name: Commit embed on main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name 'aus-fuel-watch-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          # docs/ is the nested data-branch clone — do not commit it on main
+          git add viewer/outlook-data.js data/seed/fetch-aip-outlook.js
+          if git diff --quiet --cached; then
+            echo 'no embed change on main'
+            exit 0
+          fi
+          git commit -m "outlook: refresh embedded AIP series $(date -u +%Y-%m-%d)"
+          git push origin HEAD:main

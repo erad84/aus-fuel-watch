@@ -5,7 +5,7 @@
   'use strict';
 
   const STORAGE_KEY = 'afw.cycleModel';
-  const DEFAULT_ID = 'current';
+  const DEFAULT_ID = 'arcpath';
 
   const LABELS = {
     peak: 'Peak',
@@ -1428,13 +1428,18 @@
 
   // One-time apply of product default bumps (does not run again after rev is stored).
   const DEFAULTS_REV_KEY = 'afw.defaultsRev';
-  const DEFAULTS_REV = 3;
+  const DEFAULTS_REV = 4;
   try {
     const rev = Number(global.localStorage?.getItem(DEFAULTS_REV_KEY) || 0);
     if (rev < DEFAULTS_REV) {
       setTurnTune({ ...DEFAULT_TURN_TUNE });
       setArcpathTune({ ...DEFAULT_ARCPATH_TUNE });
       setWaWeeklyAfterLast(false);
+      try {
+        global.localStorage?.setItem(STORAGE_KEY, DEFAULT_ID);
+      } catch (_) {
+        /* ignore */
+      }
       global.localStorage?.setItem(DEFAULTS_REV_KEY, String(DEFAULTS_REV));
     }
   } catch (_) {
