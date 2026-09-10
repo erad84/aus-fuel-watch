@@ -1,0 +1,360 @@
+{
+  "source": "AIP weekly (Argus) curated; ACCC fills gaps",
+  "updated": "2026-09-10",
+  "lagDays": {
+    "default": 10,
+    "min": 7,
+    "max": 14
+  },
+  "weeks": [
+    {
+      "weekEnding": "2025-10-24",
+      "gasoil": 85.6,
+      "gasoilSource": "aip",
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2025-10-31",
+      "gasoil": 89.4,
+      "gasoilSource": "aip",
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2025-11-07",
+      "gasoil": 91.4,
+      "gasoilSource": "aip",
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2025-11-14",
+      "gasoil": 92.4,
+      "gasoilSource": "aip",
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2025-11-21",
+      "gasoil": 93.2,
+      "gasoilSource": "aip",
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2026-01-02",
+      "gasoil": 74.8,
+      "gasoilSource": "aip",
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2026-01-09",
+      "gasoil": 73.5,
+      "gasoilSource": "aip",
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2026-01-23",
+      "mogas95": 67.8,
+      "source": "aip",
+      "gasoil": 77.8,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-01-30",
+      "mogas95": 67.1,
+      "source": "aip",
+      "tgp": 153.6,
+      "gasoil": 78.4,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-02-06",
+      "mogas95": 66.7,
+      "source": "aip",
+      "tgp": 153.1,
+      "gasoil": 79.4,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-02-13",
+      "mogas95": 68,
+      "source": "aip",
+      "tgp": 153,
+      "gasoil": 78.8,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-02-20",
+      "mogas95": 69.1,
+      "gasoil": 80.8,
+      "source": "aip",
+      "gasoilSource": "aip",
+      "tgp": 153.1
+    },
+    {
+      "weekEnding": "2026-02-27",
+      "mogas95": 72.1,
+      "source": "aip",
+      "tgp": 154.4,
+      "gasoil": 81.9,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-03-06",
+      "mogas95": 93.9,
+      "source": "aip",
+      "tgp": 161.2,
+      "gasoil": 124.6,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-03-11",
+      "mogas95": 106,
+      "gasoil": 140,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-03-18",
+      "mogas95": 127,
+      "gasoil": 165,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-03-25",
+      "mogas95": 138,
+      "gasoil": 193,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-03-31",
+      "mogas95": 130,
+      "gasoil": 209,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-04-03",
+      "mogas95": 132.7,
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2026-04-08",
+      "mogas95": 132,
+      "gasoil": 232,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-04-10",
+      "mogas95": 124.9,
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2026-04-15",
+      "mogas95": 119,
+      "gasoil": 181,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-04-17",
+      "mogas95": 112.5,
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2026-04-22",
+      "mogas95": 110,
+      "gasoil": 149,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-04-29",
+      "mogas95": 114,
+      "gasoil": 148,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-05-06",
+      "mogas95": 119,
+      "gasoil": 146,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-05-13",
+      "mogas95": 115,
+      "gasoil": 138,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-05-20",
+      "mogas95": 121,
+      "gasoil": 143,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-05-27",
+      "mogas95": 115,
+      "gasoil": 135,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-06-03",
+      "mogas95": 105,
+      "gasoil": 126,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-06-10",
+      "mogas95": 104,
+      "gasoil": 128,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-06-17",
+      "mogas95": 101,
+      "gasoil": 114,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-06-19",
+      "mogas95": 95.6,
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2026-06-24",
+      "mogas95": 94,
+      "gasoil": 102,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-06-26",
+      "mogas95": 92.4,
+      "source": "aip"
+    },
+    {
+      "weekEnding": "2026-07-01",
+      "mogas95": 92,
+      "gasoil": 103,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-07-08",
+      "mogas95": 89,
+      "gasoil": 106,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-07-10",
+      "mogas95": 88.8,
+      "source": "aip",
+      "gasoil": 110.2,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-07-15",
+      "mogas95": 92,
+      "gasoil": 120,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-07-17",
+      "mogas95": 97.5,
+      "source": "aip",
+      "tgp": 162.9,
+      "gasoil": 131.4,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-07-22",
+      "mogas95": 102,
+      "gasoil": 137,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-07-24",
+      "mogas95": 109.8,
+      "source": "aip",
+      "tgp": 173.1,
+      "gasoil": 144.2,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-07-29",
+      "mogas95": 110,
+      "gasoil": 144,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-07-31",
+      "mogas95": 107.7,
+      "source": "aip",
+      "tgp": 183.3,
+      "gasoil": 143,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-08-05",
+      "mogas95": 104,
+      "gasoil": 139,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-08-07",
+      "mogas95": 97.7,
+      "source": "aip",
+      "tgp": 199.8,
+      "gasoil": 132.6,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-08-12",
+      "mogas95": 99,
+      "gasoil": 134,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-08-14",
+      "mogas95": 103.1,
+      "source": "aip",
+      "tgp": 191.7,
+      "gasoil": 142.5,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-08-19",
+      "mogas95": 104,
+      "gasoil": 144,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-08-21",
+      "mogas95": 104.5,
+      "source": "aip",
+      "tgp": 194.8,
+      "gasoil": 144.7,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-08-26",
+      "mogas95": 104,
+      "gasoil": 141,
+      "source": "accc"
+    },
+    {
+      "weekEnding": "2026-08-28",
+      "mogas95": 102,
+      "source": "aip",
+      "tgp": 197.3,
+      "gasoil": 134.9,
+      "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-09-04",
+      "mogas95": 110.2,
+      "source": "aip",
+      "tgp": 197.4,
+      "gasoil": 144.4,
+      "gasoilSource": "aip"
+    }
+  ],
+  "lastFetch": {
+    "at": "2026-09-10T11:58:54.675Z",
+    "pdfCandidates": 50,
+    "pdfsParsed": 32,
+    "parsedRows": 64
+  }
+}
