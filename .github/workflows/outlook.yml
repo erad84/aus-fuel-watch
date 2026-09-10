@@ -1,11 +1,13 @@
 name: outlook
 
-# Weekly AIP Argus Mogas 95 / Gasoil refresh → data branch (Pages) + main embed.
+# Weekly AIP + weekday CME lead refresh → data branch (Pages) + main embeds.
 
 on:
   schedule:
     # Tuesday 06:00 AEST → Monday 20:00 UTC (AIP usually posts Mon/Tue)
     - cron: '0 20 * * 1'
+    # Weekday CME settle pin (after NY session) ≈ 07:30 AEST Tue–Sat → 21:30 UTC Mon–Fri
+    - cron: '30 21 * * 1-5'
   workflow_dispatch:
 
 concurrency:
@@ -47,6 +49,9 @@ jobs:
       - name: Fetch AIP outlook
         run: node data/seed/fetch-aip-outlook.js
 
+      - name: Fetch CME daily lead
+        run: node data/seed/fetch-cme-lead.js
+
       - name: Commit and push data branch
         working-directory: docs
         env:
@@ -61,7 +66,7 @@ jobs:
             echo 'no change on data branch'
           else
             git add -A
-            git commit -m "outlook: $(date -u +%Y-%m-%d) AIP refresh"
+            git commit -m "outlook/lead: $(date -u +%Y-%m-%d) refresh"
             for attempt in 1 2 3; do
               if git push -u origin HEAD:data; then break; fi
               git pull --rebase origin data || exit 1
@@ -76,10 +81,10 @@ jobs:
           git config user.name 'aus-fuel-watch-bot'
           git config user.email 'actions@users.noreply.github.com'
           # docs/ is the nested data-branch clone — do not commit it on main
-          git add viewer/outlook-data.js data/seed/fetch-aip-outlook.js
+          git add viewer/outlook-data.js viewer/lead-data.js data/seed/fetch-aip-outlook.js data/seed/fetch-cme-lead.js
           if git diff --quiet --cached; then
             echo 'no embed change on main'
             exit 0
           fi
-          git commit -m "outlook: refresh embedded AIP series $(date -u +%Y-%m-%d)"
+          git commit -m "outlook: refresh AIP + CME lead embeds $(date -u +%Y-%m-%d)"
           git push origin HEAD:main
