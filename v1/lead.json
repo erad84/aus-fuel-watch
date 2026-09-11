@@ -2962,28 +2962,28 @@
       "date": "2026-09-10",
       "mogas95": 123.2,
       "mogas95Source": "brent_extend",
-      "mogas95Usd": 141.437,
+      "mogas95Usd": 140.166,
       "gasoil": 161.4,
       "gasoilSource": "brent_extend",
-      "gasoilUsd": 185.292,
-      "fxAudUsd": 0.72209
+      "gasoilUsd": 183.627,
+      "fxAudUsd": 0.7156
     },
     {
       "date": "2026-09-11",
-      "mogas95": 104,
+      "mogas95": 103.9,
       "mogas95Source": "cme",
       "mogas95Usd": 118.469,
-      "gasoil": 157.4,
+      "gasoil": 158.4,
       "gasoilSource": "cme",
-      "gasoilUsd": 179.212,
-      "fxAudUsd": 0.716281
+      "gasoilUsd": 180.603,
+      "fxAudUsd": 0.717257
     }
   ],
   "lastFetch": {
-    "at": "2026-09-11T04:32:02.223Z",
+    "at": "2026-09-11T21:31:53.176Z",
     "liveIso": "2026-09-11",
     "mogas95Usd": 118.469,
-    "gasoilUsd": 179.212,
+    "gasoilUsd": 180.603,
     "dayCount": 323,
     "mogasCmeDays": 1,
     "gasoilCmeDays": 1
