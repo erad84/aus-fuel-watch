@@ -3000,20 +3000,20 @@
     },
     {
       "date": "2026-09-14",
-      "mogas95": 104.3,
+      "mogas95": 104.4,
       "mogas95Source": "cme",
       "mogas95Usd": 118.469,
-      "gasoil": 159.1,
+      "gasoil": 160.2,
       "gasoilSource": "cme",
-      "gasoilUsd": 180.603,
-      "fxAudUsd": 0.714133
+      "gasoilUsd": 181.842,
+      "fxAudUsd": 0.71398
     }
   ],
   "lastFetch": {
-    "at": "2026-09-14T20:15:18.736Z",
+    "at": "2026-09-14T21:35:36.058Z",
     "liveIso": "2026-09-14",
     "mogas95Usd": 118.469,
-    "gasoilUsd": 180.603,
+    "gasoilUsd": 181.842,
     "dayCount": 326,
     "mogasCmeDays": 2,
     "gasoilCmeDays": 2
