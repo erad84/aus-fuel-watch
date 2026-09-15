@@ -13,10 +13,26 @@ Open **http://localhost:3456**
 
 This serves the viewer and local `docs/` at `/docs/`. No third-party proxy is required.
 
-You can also open `viewer/index.html` directly in the browser: suburb search uses
-[`au-suburbs-data.js`](au-suburbs-data.js) and Outlook uses [`outlook-data.js`](outlook-data.js)
-(no local server). Price history / stations still need a Data base URL (GitHub Pages or a
-local `docs/` server).
+You can also open `viewer/index.html` directly in the browser. Suburb search, Outlook,
+and CME lead all prefer published JSON (Data base URL / Pages) when available;
+[`au-suburbs-data.js`](au-suburbs-data.js), [`outlook-data.js`](outlook-data.js), and
+[`lead-data.js`](lead-data.js) are offline fallbacks only. Price history / stations
+always use the Data base URL.
+
+### Data loading (source of truth)
+
+Published watch/viewer series live under `{dataBase}/v1/` on the **data** branch
+(GitHub Pages). The viewer fetches those first on **Load data**; local `*-data.js`
+embeds are fallbacks for offline / `file://` only. New data feeds should follow the
+same pattern: write `docs/v1/….json` in the cron/pipeline, then load via `baseUrl()`.
+
+| Dataset | Pages path | Embed fallback |
+| --- | --- | --- |
+| State / station history | `v1/index.json`, `v1/{STATE}.json`, … | — |
+| AIP weekly Mogas/Gasoil | `v1/outlook.json` | `outlook-data.js` |
+| CME daily lead | `v1/lead.json` | `lead-data.js` |
+| Lag calib (cron, ~180d) | `v1/lag-calib.json` (+ `lead.json` `lagDays`) | — |
+| AU suburbs (optional on Pages) | `v1/au-suburbs.json`, else viewer `au-suburbs.json` | `au-suburbs-data.js` |
 
 ### Data URLs
 
@@ -34,8 +50,10 @@ Click **Load data**, then **Go to capital** (or zoom the map) to load stations f
 - Time-series charts from `v1/{STATE}.json` + archives
 - Leaflet map + station list from published day files
 - Scope + favourites cycle dials and turn markers
-- Outlook bar (Singapore Mogas 95 / Gasoil rising–falling + lag ETA) under the state dial
-- Singapore Mogas/Gasoil overlay on the fuel graph (Graph view checkbox)
+- Outlook bar (last AIP weekly Mogas/Gasoil move on ±8 c/L Falling↔Rising scale; hover-scrub)
+- Singapore Mogas/Gasoil weekly overlay + CME/ICE daily settle lead on the fuel graph
+- Per-state lag from cron `lag-calib.json` (~180d); viewer falls back to local calib if missing
+- Chart periods: 30 / 60 / 90 / 120 / 180 days (archives fill beyond the live 90d window)
 - Favourites list (default station, mean/low/high series, summary bars)
 - Suburb / postcode search for favourite-area centre (AU-wide) + radius stats
 
@@ -50,8 +68,21 @@ node data/seed/fetch-aip-outlook.js
 
 Discovers PDFs via the AIP WordPress media API, parses Last/Previous week averages, and
 merges into `docs/v1/outlook.json` plus `viewer/outlook-data.js` (AIP overwrites ACCC for
-the same `weekEnding`). A weekly GitHub Action (`.github/workflows/outlook.yml`) refreshes
-Pages `v1/outlook.json` and commits the embed on `main`.
+the same `weekEnding`).
+
+## CME daily lead (`docs/v1/lead.json`)
+
+Daily Singapore Mogas 95 / Gasoil lead in AUD c/L for turn timing. Live pins from NYMEX
+Platts settles (TradingView delayed); history reshaped from AIP weekly anchors + Brent
+moves; FX from Yahoo AUDUSD. Refresh:
+
+```bash
+node data/seed/fetch-cme-lead.js
+```
+
+Writes `docs/v1/lead.json` plus `viewer/lead-data.js`. The outlook GitHub Action
+(`.github/workflows/outlook.yml`) refreshes AIP weekly and pins CME settles on weekdays,
+then updates Pages + embeds on `main`.
 
 ## User prefs (`afw.userPrefs`)
 

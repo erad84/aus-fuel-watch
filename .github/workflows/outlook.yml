@@ -52,6 +52,9 @@ jobs:
       - name: Fetch CME daily lead
         run: node data/seed/fetch-cme-lead.js
 
+      - name: Calibrate AU lag vs lead (~180d)
+        run: node data/seed/calibrate-lag.js --window 180
+
       - name: Commit and push data branch
         working-directory: docs
         env:
@@ -81,7 +84,7 @@ jobs:
           git config user.name 'aus-fuel-watch-bot'
           git config user.email 'actions@users.noreply.github.com'
           # docs/ is the nested data-branch clone — do not commit it on main
-          git add viewer/outlook-data.js viewer/lead-data.js data/seed/fetch-aip-outlook.js data/seed/fetch-cme-lead.js
+          git add viewer/outlook-data.js viewer/lead-data.js data/seed/fetch-aip-outlook.js data/seed/fetch-cme-lead.js data/seed/calibrate-lag.js data/lib/lagCalib.js
           if git diff --quiet --cached; then
             echo 'no embed change on main'
             exit 0

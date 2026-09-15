@@ -36,12 +36,15 @@
         favLow: true,
         favHigh: true,
         station: true,
+        mogas: true,
+        lead: true,
       },
       turnLines: {
         state: true,
         suburb: true,
         fav: true,
         station: true,
+        fft: true,
       },
     };
   }
@@ -74,7 +77,7 @@
       base.defaultScope = raw.defaultScope;
     }
     const pd = Number(raw.periodDays);
-    if (pd === 30 || pd === 60 || pd === 90) base.periodDays = pd;
+    if (pd === 30 || pd === 60 || pd === 90 || pd === 120 || pd === 180) base.periodDays = pd;
     const favs = Array.isArray(raw.favourites) ? raw.favourites : [];
     const seen = new Set();
     for (const f of favs) {

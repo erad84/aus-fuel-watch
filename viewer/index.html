@@ -92,6 +92,8 @@
               <option value="30">30 days</option>
               <option value="60">60 days</option>
               <option value="90" selected>90 days</option>
+              <option value="120">120 days</option>
+              <option value="180">180 days</option>
             </select>
           </label>
         </div>
@@ -118,12 +120,14 @@
             <label class="checkbox"><input id="showFavHigh" type="checkbox" checked /> Favourites high</label>
             <label class="checkbox"><input id="showStation" type="checkbox" checked /> Station</label>
             <label class="checkbox" title="Singapore Mogas 95 (petrol) or Gasoil (diesel) from curated AIP/ACCC outlook.json"><input id="showMogas" type="checkbox" checked /> Singapore Mogas / Gasoil</label>
+            <label class="checkbox" title="Daily NYMEX Singapore Mogas 95 / Gasoil (Platts) settlement lead — used for outlook turn timing"><input id="showLead" type="checkbox" checked /> CME/ICE daily settle</label>
           </div>
           <div class="line-toggles turn-line-toggles" role="group" aria-label="Turn lines">
             <label class="checkbox"><input id="showStateTurns" type="checkbox" checked /> State turns</label>
             <label class="checkbox"><input id="showSuburbTurns" type="checkbox" checked /> Suburb turns</label>
             <label class="checkbox"><input id="showFavTurns" type="checkbox" checked /> Favourites turns</label>
             <label class="checkbox"><input id="showStationTurns" type="checkbox" checked /> Station turns</label>
+            <label class="checkbox" title="Show dominant FFT cycle curves for state / suburb / favourites means"><input id="showFftCurves" type="checkbox" checked /> FFT curves</label>
           </div>
         </div>
       </details>
@@ -175,7 +179,6 @@
           <div id="cycleStages" class="cycle-stages"></div>
         </div>
       </div>
-      <div id="outlookBar" class="outlook-bar-mount"></div>
       <details id="arcpathTune" class="tune-fold arcpath-tune hidden">
         <summary>Dial adjustments</summary>
         <div class="arcpath-tune-body">
@@ -208,6 +211,7 @@
           <button id="tuneArcpathReset" type="button" class="btn-secondary">Reset defaults</button>
         </div>
       </details>
+      <div id="outlookBar" class="outlook-bar-mount"></div>
       <div id="summaryCards" class="cards"></div>
       <div id="e10Compare" class="e10-box hidden"></div>
       <div id="stateRankBars"></div>
@@ -292,6 +296,7 @@
   <script src="userPrefs.js"></script>
   <script src="au-suburbs-data.js"></script>
   <script src="outlook-data.js"></script>
+  <script src="lead-data.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

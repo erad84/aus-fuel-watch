@@ -125,9 +125,92 @@ const publishedStationCache = {
 let outlookData = /** @type {{
   source?: string,
   updated?: string,
-  lagDays?: { default: number, min: number, max: number },
+  lagDays?: { default: number, min: number, max: number, byState?: Record<string, number> },
   weeks?: Array<{ weekEnding: string, mogas95?: number|null, gasoil?: number|null, source?: string }>
 } | null} */ (null);
+
+/** Daily CME/ICE Singapore lead series from docs/v1/lead.json */
+let leadData = /** @type {{
+  source?: string,
+  updated?: string,
+  symbols?: Record<string, string>,
+  lagDays?: { default: number, min: number, max: number, byState?: Record<string, number> },
+  days?: Array<{
+    date: string,
+    mogas95?: number|null,
+    gasoil?: number|null,
+    mogas95Source?: string,
+    gasoilSource?: string
+  }>
+} | null} */ (null);
+
+/** Runtime-calibrated lag (days) by state from lead vs state-mean cross-correlation. */
+let calibratedLagByState = /** @type {Record<string, number>} */ ({});
+/**
+ * @type {Record<string, {
+ *   corr: number,
+ *   n: number,
+ *   lag: number,
+ *   soft: boolean,
+ *   source?: 'daily'|'merged'|'turns'|'soft'|'published',
+ *   turns?: { corr: number, n: number, lag: number } | null,
+ *   moveBand?: {
+ *     smooth: number,
+ *     retDays: number,
+ *     lag: number,
+ *     intercept: number,
+ *     slope: number,
+ *     slopeThrough: number,
+ *     residP10: number,
+ *     residP90: number,
+ *     n: number
+ *   } | null
+ * }>}
+ */
+let calibratedLagMeta = {};
+
+/** Cron-published lag calib from docs/v1/lag-calib.json (Pages). */
+let publishedLagCalib = /** @type {{
+  byState?: Record<string, object>,
+  lagDays?: { default?: number, min?: number, max?: number, byState?: Record<string, number> },
+  updated?: string,
+  windowDays?: number
+} | null} */ (null);
+
+/** Min Spearman r to trust calibrated lag for ETA math / “calib” label. */
+const LAG_CALIB_STRONG_R = 0.3;
+/** Below this, ignore daily calibration entirely. */
+const LAG_CALIB_MIN_R = 0.15;
+/** Turn-assist needs stronger r and enough events to override soft daily. */
+const LAG_TURN_ASSIST_R = 0.5;
+const LAG_TURN_MIN_N = 8;
+/** Agree window (days) to blend daily + turn lags. */
+const LAG_TURN_AGREE_DAYS = 3;
+const LAG_SMOOTH_GRID = [5, 7];
+const LAG_RET_GRID = [5, 7];
+const LAG_TURN_WINDOW = 7;
+const LAG_TURN_THRESH = 0.4;
+/** Min lagged change pairs to fit an 80% move band. */
+const LAG_MOVE_BAND_MIN_N = 20;
+/** Min residual samples for a size-matched (conditional) error band. */
+const LAG_MOVE_BAND_COND_MIN_N = 12;
+/** Start |lead Δ| match window as [target/r, target*r]; expand if too few samples. */
+const LAG_MOVE_BAND_COND_RATIO0 = 2;
+/** |1d Mogas move| (c/L) treated as a possible spike. */
+const LEAD_SPIKE_ABS_MIN = 3;
+/** Fraction of spike reversed within 1–2d to call it an unwind/settle. */
+const LEAD_SPIKE_RETRACE_FRAC = 0.35;
+/** Biz days after spike tip to wait before trusting a held jump. */
+const LEAD_SPIKE_SETTLE_DAYS = 2;
+/** After a spike tip, day-to-day |Δ| below this ≈ still at the tip. */
+const LEAD_SPIKE_TIP_FLAT = 1.2;
+/**
+ * Rolling biz-day window for Outlook direction / Falling↔Rising marker.
+ * (Kept for daily CME fallback analysis helpers; simple AIP bar uses last week Δ.)
+ */
+const OUTLOOK_DIR_SMOOTH_DAYS = 3;
+/** Falling↔Rising bar maps AIP week Δ onto ± this many c/L at the extremes. */
+const OUTLOOK_BAR_SCALE_CPL = 8;
 /** @type {{ state: string, publishedId: string, byDate: Map<string, number>, daysLoaded: number } | null} */
 let selectedPublishedHistory = null;
 /** @type {{ mean: (number|null)[], low: (number|null)[], high: (number|null)[], peerCount: number, radiusKm: number } | null} */
@@ -323,6 +406,29 @@ function initTuneFoldHeightSync() {
       requestAnimationFrame(() => syncChartHeightToSummary());
     });
   }
+}
+
+/** Outlook mount is recreated on each render — keep chart height in sync if needed. */
+function initOutlookDetailsFoldSync() {
+  /* no details fold in the simple AIP outlook bar */
+}
+
+/** Cheapest-in-area folds: remember open state + keep chart height in sync. */
+function initCheapestStationsFoldSync() {
+  if (document.documentElement.dataset.cheapestFoldBound) return;
+  document.documentElement.dataset.cheapestFoldBound = '1';
+  document.addEventListener(
+    'toggle',
+    (ev) => {
+      const t = ev.target;
+      if (!(t instanceof HTMLDetailsElement)) return;
+      if (!t.classList.contains('cheapest-stations-fold')) return;
+      const key = t.dataset.foldKey;
+      if (key) cheapestStationsFoldOpen[key] = t.open;
+      requestAnimationFrame(() => syncChartHeightToSummary());
+    },
+    true
+  );
 }
 
 function applyArcpathTuneToInputs() {
@@ -830,8 +936,8 @@ function findChartCycleMarks(fullSeries, visibleSeries, state) {
   turns = consolidateVisibleTurns(visibleSeries, turns, minSep);
 
   let fftOverlay = null;
-  const tune = CycleModels.getTurnTune?.();
-  if ((tune?.fftAssist ?? 0) > 0 && CycleModels.buildFftChartOverlay) {
+  // Build FFT curves when the graph toggle is on (independent of FFT assist on turns).
+  if (fftCurvesVisible() && CycleModels.buildFftChartOverlay) {
     fftOverlay = CycleModels.buildFftChartOverlay(visibleSeries);
   }
   return { turns, modelId: id, fftOverlay };
@@ -976,6 +1082,7 @@ function applySelectedDay(dataIndex) {
   applyFavouritesDialForDate(iso);
   applyAreaDialForDate(iso);
   applyStationDialForDate(iso);
+  renderOutlookBar();
 }
 
 function favCycleStageForDate(isoDate) {
@@ -1292,6 +1399,8 @@ function lineVisibility() {
     favLow: document.getElementById('showFavLow')?.checked !== false,
     favHigh: document.getElementById('showFavHigh')?.checked !== false,
     mogas: document.getElementById('showMogas')?.checked !== false,
+    lead: document.getElementById('showLead')?.checked !== false,
+    fft: document.getElementById('showFftCurves')?.checked !== false,
   };
 }
 
@@ -1302,6 +1411,10 @@ function turnLineVisibility() {
     fav: document.getElementById('showFavTurns')?.checked !== false,
     station: document.getElementById('showStationTurns')?.checked !== false,
   };
+}
+
+function fftCurvesVisible() {
+  return document.getElementById('showFftCurves')?.checked !== false;
 }
 
 function applyTurnLineVisibility() {
@@ -1372,6 +1485,9 @@ const STATE_LINE_COLOR_SOFT = 'rgba(59, 130, 246, 0.75)';
 /** Singapore Mogas 95 / Gasoil overlay on fuel chart */
 const MOGAS_LINE_COLOR = '#f59e0b';
 const MOGAS_LINE_COLOR_SOFT = 'rgba(245, 158, 11, 0.85)';
+/** Daily CME/ICE Singapore settlement lead */
+const LEAD_LINE_COLOR = '#0d9488';
+const LEAD_LINE_COLOR_SOFT = 'rgba(13, 148, 136, 0.85)';
 
 /** @deprecated aliases kept for any leftover refs */
 const AREA_MEAN_COLOR = AREA_LINE_COLOR;
@@ -1892,9 +2008,9 @@ function renderHistoryChart(labels, citySeries, fuel, title, state, marks) {
   const areaSeries = areaSeriesForLabels(selectedAreaSeries, labels);
   const favSeries = favouritesSeriesForLabels(selectedFavouritesSeries, labels);
   const extraForBounds = [];
-  if (vis.avg && stateFft?.curve) extraForBounds.push(stateFft.curve);
-  if (vis.areaMean && areaFft?.curve) extraForBounds.push(areaFft.curve);
-  if (vis.favMean && favFft?.curve) extraForBounds.push(favFft.curve);
+  if (vis.avg && vis.fft && stateFft?.curve) extraForBounds.push(stateFft.curve);
+  if (vis.areaMean && vis.fft && areaFft?.curve) extraForBounds.push(areaFft.curve);
+  if (vis.favMean && vis.fft && favFft?.curve) extraForBounds.push(favFft.curve);
   if (vis.station && stationOverlay) extraForBounds.push(stationOverlay.data);
   if (vis.areaMean && areaSeries?.mean) extraForBounds.push(areaSeries.mean);
   if (vis.areaLow && areaSeries?.low) extraForBounds.push(areaSeries.low);
@@ -1904,10 +2020,12 @@ function renderHistoryChart(labels, citySeries, fuel, title, state, marks) {
   if (vis.favHigh && favSeries?.high) extraForBounds.push(favSeries.high);
   const mogasOverlay = outlookSeriesForLabels(labels, fuel);
   if (vis.mogas && mogasOverlay?.data) extraForBounds.push(mogasOverlay.data);
+  const leadOverlay = leadSeriesForLabels(labels, fuel);
+  if (vis.lead && leadOverlay?.data) extraForBounds.push(leadOverlay.data);
   const yBounds = yBoundsFromVisible(citySeries, vis, extraForBounds.length ? extraForBounds : null);
 
   const pointStyle = {
-    pointRadius: 3,
+    pointRadius: 0,
     pointHoverRadius: 6,
     pointHitRadius: 10,
   };
@@ -2012,9 +2130,9 @@ function renderHistoryChart(labels, citySeries, fuel, title, state, marks) {
       hidden,
     });
   };
-  pushFftDataset(stateFft, 'State', STATE_LINE_COLOR, 'stateFft', !vis.avg);
-  pushFftDataset(areaFft, 'Suburb', AREA_LINE_COLOR, 'areaFft', !vis.areaMean);
-  pushFftDataset(favFft, 'Favourites', FAV_LINE_COLOR, 'favFft', !vis.favMean);
+  pushFftDataset(stateFft, 'State', STATE_LINE_COLOR, 'stateFft', !vis.avg || !vis.fft);
+  pushFftDataset(areaFft, 'Suburb', AREA_LINE_COLOR, 'areaFft', !vis.areaMean || !vis.fft);
+  pushFftDataset(favFft, 'Favourites', FAV_LINE_COLOR, 'favFft', !vis.favMean || !vis.fft);
 
   if (areaSeries?.mean?.length) {
     datasets.push({
@@ -2130,7 +2248,7 @@ function renderHistoryChart(labels, citySeries, fuel, title, state, marks) {
       spanGaps: true,
       hidden: !vis.station,
       showLine: stationOverlay.showLine,
-      pointRadius: (ctx) => (ctx.raw != null ? 5 : 0),
+      pointRadius: 0,
       pointHoverRadius: 7,
       pointHitRadius: 12,
       pointBackgroundColor: STATION_LINE_COLOR,
@@ -2153,6 +2271,25 @@ function renderHistoryChart(labels, citySeries, fuel, title, state, marks) {
       fill: false,
       spanGaps: true,
       hidden: !vis.mogas,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointHitRadius: 8,
+    });
+  }
+
+  if (leadOverlay?.data?.length) {
+    datasets.push({
+      label: leadOverlay.label,
+      visKey: 'lead',
+      data: leadOverlay.data,
+      borderColor: LEAD_LINE_COLOR,
+      backgroundColor: LEAD_LINE_COLOR_SOFT,
+      borderDash: [2, 2],
+      borderWidth: 2,
+      tension: 0.15,
+      fill: false,
+      spanGaps: true,
+      hidden: !vis.lead,
       pointRadius: 0,
       pointHoverRadius: 4,
       pointHitRadius: 8,
@@ -2232,15 +2369,15 @@ function applyLineVisibility() {
       return;
     }
     if (ds.visKey === 'areaMean' || ds.visKey === 'areaFft') {
-      ds.hidden = !vis.areaMean;
+      ds.hidden = ds.visKey === 'areaFft' ? !vis.areaMean || !vis.fft : !vis.areaMean;
       return;
     }
     if (ds.visKey === 'favMean' || ds.visKey === 'favFft') {
-      ds.hidden = !vis.favMean;
+      ds.hidden = ds.visKey === 'favFft' ? !vis.favMean || !vis.fft : !vis.favMean;
       return;
     }
     if (ds.visKey === 'stateFft') {
-      ds.hidden = !vis.avg;
+      ds.hidden = !vis.avg || !vis.fft;
       return;
     }
     if (ds.visKey === 'favLow') {
@@ -2253,6 +2390,10 @@ function applyLineVisibility() {
     }
     if (ds.visKey === 'mogas') {
       ds.hidden = !vis.mogas;
+      return;
+    }
+    if (ds.visKey === 'lead') {
+      ds.hidden = !vis.lead;
       return;
     }
     if (Object.prototype.hasOwnProperty.call(map, ds.label)) ds.hidden = !map[ds.label];
@@ -2473,18 +2614,90 @@ function outlookCommodityLabel(fuel) {
   return fuel === 'DSL' ? 'Singapore Gasoil' : 'Singapore Mogas 95';
 }
 
+function leadCommodityLabel(fuel) {
+  return fuel === 'DSL' ? 'CME Gasoil settle' : 'CME Mogas 95 settle';
+}
+
 async function loadOutlookData() {
+  // Prefer published Pages / dataBase (source of truth); embed is offline fallback only.
+  try {
+    const remote = await fetchJson(`${baseUrl()}/v1/outlook.json`);
+    if (remote?.weeks?.length) {
+      outlookData = remote;
+      return outlookData;
+    }
+  } catch (e) {
+    console.warn('outlook.json:', e.message);
+  }
   if (window.OUTLOOK_DATA?.weeks?.length) {
     outlookData = window.OUTLOOK_DATA;
     return outlookData;
   }
-  try {
-    outlookData = await fetchJson(`${baseUrl()}/v1/outlook.json`);
-  } catch (e) {
-    console.warn('outlook.json:', e.message);
-    outlookData = null;
-  }
+  outlookData = null;
   return outlookData;
+}
+
+async function loadLeadData() {
+  // Prefer published Pages / dataBase (source of truth); embed is offline fallback only.
+  try {
+    const remote = await fetchJson(`${baseUrl()}/v1/lead.json`);
+    if (remote?.days?.length) {
+      leadData = remote;
+      return leadData;
+    }
+  } catch (e) {
+    console.warn('lead.json:', e.message);
+  }
+  if (window.LEAD_DATA?.days?.length) {
+    leadData = window.LEAD_DATA;
+    return leadData;
+  }
+  leadData = null;
+  return leadData;
+}
+
+async function loadLagCalibData() {
+  try {
+    const remote = await fetchJson(`${baseUrl()}/v1/lag-calib.json`);
+    if (remote?.byState && typeof remote.byState === 'object') {
+      publishedLagCalib = remote;
+      applyPublishedLagCalib();
+      return publishedLagCalib;
+    }
+  } catch (e) {
+    console.warn('lag-calib.json:', e.message);
+  }
+  publishedLagCalib = null;
+  return null;
+}
+
+/** Seed runtime lag maps from cron-published calib (trusted / non-soft only for byState). */
+function applyPublishedLagCalib() {
+  const by = publishedLagCalib?.byState;
+  if (!by) return;
+  for (const [st, row] of Object.entries(by)) {
+    if (!row || !Number.isFinite(Number(row.lag))) continue;
+    const lag = Math.round(Number(row.lag));
+    const soft = !!row.soft;
+    calibratedLagMeta[st] = {
+      corr: Number(row.corr) || 0,
+      n: Number(row.n) || 0,
+      lag,
+      soft,
+      source: soft ? 'soft' : row.source || 'published',
+      turns: row.turns || null,
+      published: true,
+      scope: row.scope || null,
+      windowDays: publishedLagCalib.windowDays || null,
+    };
+    if (!soft) calibratedLagByState[st] = lag;
+  }
+}
+
+function hasPublishedLag(state) {
+  const st = String(state || '').toUpperCase();
+  const row = publishedLagCalib?.byState?.[st];
+  return !!(row && Number.isFinite(Number(row.lag)) && !row.soft);
 }
 
 function outlookWeeksForFuel(fuel) {
@@ -2498,6 +2711,20 @@ function outlookWeeksForFuel(fuel) {
       source: w.source || w.gasoilSource || null,
     }))
     .sort((a, b) => a.weekEnding.localeCompare(b.weekEnding));
+}
+
+function leadDaysForFuel(fuel) {
+  const key = outlookCommodityKey(fuel);
+  const srcKey = key === 'gasoil' ? 'gasoilSource' : 'mogas95Source';
+  const days = leadData?.days || [];
+  return days
+    .filter((d) => d?.[key] != null && Number.isFinite(Number(d[key])))
+    .map((d) => ({
+      date: d.date,
+      value: Number(d[key]),
+      source: d[srcKey] || d.source || null,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** Step-forward weekly commodity onto daily chart labels (c/L). */
@@ -2517,94 +2744,971 @@ function outlookSeriesForLabels(labels, fuel) {
   };
 }
 
-function outlookLagDays() {
-  const d = outlookData?.lagDays;
+/** Align daily CME lead onto chart labels (c/L), carry-forward across weekends. */
+function leadSeriesForLabels(labels, fuel) {
+  const days = leadDaysForFuel(fuel);
+  if (!labels?.length || !days.length) return null;
+  let di = -1;
+  const data = labels.map((iso) => {
+    while (di + 1 < days.length && days[di + 1].date <= iso) di += 1;
+    return di >= 0 ? days[di].value : null;
+  });
+  if (!data.some((v) => v != null)) return null;
+  return {
+    data,
+    label: leadCommodityLabel(fuel),
+    lastDay: days[days.length - 1],
+  };
+}
+
+function lagConfig() {
+  return (
+    publishedLagCalib?.lagDays ||
+    leadData?.lagDays ||
+    outlookData?.lagDays || { default: 10, min: 5, max: 21, byState: {} }
+  );
+}
+
+function outlookLagDays(state) {
+  const d = lagConfig();
+  const st = (state || document.getElementById('stateSelect')?.value || '').toUpperCase();
+  // Strong / merged / turn-assisted / published calibrations override configured defaults.
+  if (st && calibratedLagByState[st] != null && !calibratedLagMeta[st]?.soft) {
+    return calibratedLagByState[st];
+  }
+  const by = d?.byState?.[st];
+  if (Number.isFinite(Number(by)) && Number(by) > 0) return Math.round(Number(by));
   const def = Number(d?.default);
   if (Number.isFinite(def) && def > 0) return Math.round(def);
   return 10;
 }
 
-/**
- * Directional confidence 0..100 (Falling← →Rising) from recent weekly changes.
- */
-function outlookTrendSignal(fuel) {
-  const weeks = outlookWeeksForFuel(fuel);
-  if (weeks.length < 2) return null;
-  const deltas = [];
-  for (let i = 1; i < weeks.length; i++) {
-    deltas.push(weeks[i].value - weeks[i - 1].value);
+function lagNoteForState(st, lag) {
+  const meta = calibratedLagMeta[st];
+  if (!meta) return `${lag}d (${st || 'default'})`;
+  const rn = `r=${meta.corr} n=${meta.n}`;
+  const pub = meta.published ? ' · cron' : '';
+  if (meta.soft) {
+    return `${lag}d (${st} · soft ~${meta.lag}d ${rn}${pub})`;
   }
-  const recent = deltas.slice(-3);
-  const last = recent[recent.length - 1];
-  const meanAbs =
-    recent.reduce((s, d) => s + Math.abs(d), 0) / Math.max(1, recent.length) || 1;
-  const scale = Math.max(2, meanAbs * 1.5);
-  let pct = 50 + (last / scale) * 50;
-  pct = Math.max(0, Math.min(100, pct));
-  const direction = last > 0.4 ? 'rising' : last < -0.4 ? 'falling' : 'flat';
-  const confidence = Math.min(100, Math.round((Math.abs(last) / scale) * 100));
+  if (meta.source === 'merged') {
+    return `${lag}d (${st} calib+turns ${rn}${pub})`;
+  }
+  if (meta.source === 'turns') {
+    return `${lag}d (${st} turn-assist ${rn}${pub})`;
+  }
+  if (meta.published || meta.source === 'published') {
+    return `${lag}d (${st} calib ${rn} · cron)`;
+  }
+  return `${lag}d (${st} calib ${rn})`;
+}
 
-  let turnIdx = -1;
-  for (let i = deltas.length - 1; i >= 1; i--) {
-    if (deltas[i - 1] === 0) continue;
-    if (Math.sign(deltas[i]) !== 0 && Math.sign(deltas[i - 1]) !== Math.sign(deltas[i])) {
-      turnIdx = i;
-      break;
+function turnsLagNote(st) {
+  const t = calibratedLagMeta[st]?.turns;
+  if (!t) return null;
+  return `Turn assist · ~${t.lag}d behind · r=${t.corr} · n=${t.n}`;
+}
+
+function quantileSorted(sorted, p) {
+  if (!sorted?.length) return null;
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.min(lo + 1, sorted.length - 1);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+/**
+ * Fit retail Δ ≈ b·lead Δ (through-origin) at lag L for amount translation;
+ * also keep OLS a+b for reference. Residuals are vs through-origin fit.
+ * Stores per-pair residuals so prediction can size-match |Mogas Δ|.
+ */
+function fitMoveBandModel(pairs, lag, smooth, retDays) {
+  const { leadCh, avgCh } = lagChangeSeries(pairs, smooth, retDays);
+  if (leadCh.length < lag + LAG_MOVE_BAND_MIN_N) return null;
+  const xs = [];
+  const ys = [];
+  for (let i = 0; i + lag < leadCh.length; i++) {
+    xs.push(leadCh[i]);
+    ys.push(avgCh[i + lag]);
+  }
+  const n = xs.length;
+  if (n < LAG_MOVE_BAND_MIN_N) return null;
+  let sx = 0;
+  let sy = 0;
+  let sxx = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sx += xs[i];
+    sy += ys[i];
+    sxx += xs[i] * xs[i];
+    sxy += xs[i] * ys[i];
+  }
+  const mx = sx / n;
+  const my = sy / n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx;
+    num += dx * (ys[i] - my);
+    den += dx * dx;
+  }
+  if (den < 1e-12 || sxx < 1e-12) return null;
+  const slope = num / den;
+  const intercept = my - slope * mx;
+  const slopeThrough = sxy / sxx;
+  const resid = [];
+  const residPairs = [];
+  for (let i = 0; i < n; i++) {
+    const r = ys[i] - slopeThrough * xs[i];
+    resid.push(r);
+    residPairs.push({ x: xs[i], r });
+  }
+  resid.sort((a, b) => a - b);
+  const residP10 = quantileSorted(resid, 0.1);
+  const residP25 = quantileSorted(resid, 0.25);
+  const residP75 = quantileSorted(resid, 0.75);
+  const residP90 = quantileSorted(resid, 0.9);
+  if (residP10 == null || residP90 == null) return null;
+  return {
+    smooth,
+    retDays,
+    lag,
+    intercept: Math.round(intercept * 1000) / 1000,
+    slope: Math.round(slope * 1000) / 1000,
+    slopeThrough: Math.round(slopeThrough * 1000) / 1000,
+    residP10: Math.round(residP10 * 100) / 100,
+    residP25: residP25 != null ? Math.round(residP25 * 100) / 100 : null,
+    residP75: residP75 != null ? Math.round(residP75 * 100) / 100 : null,
+    residP90: Math.round(residP90 * 100) / 100,
+    residPairs,
+    n,
+  };
+}
+
+/**
+ * Size-matched residual quantiles for a lead Δ (same sign, similar |Δ|).
+ * Expands the |Δ| window until enough samples, else falls back to all residuals.
+ */
+function residualQuantilesForLead(mb, leadDelta, pLo, pHi) {
+  const pairs = mb?.residPairs;
+  const target = Math.abs(Number(leadDelta));
+  const sign = Math.sign(Number(leadDelta)) || 0;
+  if (!pairs?.length || !Number.isFinite(target)) {
+    return {
+      lo: mb?.residP10 ?? null,
+      hi: mb?.residP90 ?? null,
+      n: mb?.n ?? 0,
+      matched: false,
+    };
+  }
+
+  const sameSign = pairs.filter((p) => sign === 0 || Math.sign(p.x) === sign || Math.abs(p.x) < 0.15);
+  const pool = sameSign.length >= LAG_MOVE_BAND_COND_MIN_N ? sameSign : pairs;
+
+  let selected = pool;
+  let matched = false;
+  if (target >= 0.5) {
+    let ratio = LAG_MOVE_BAND_COND_RATIO0;
+    selected = [];
+    while (ratio <= 8 && selected.length < LAG_MOVE_BAND_COND_MIN_N) {
+      selected = pool.filter((p) => {
+        const ax = Math.abs(p.x);
+        return ax >= target / ratio && ax <= target * ratio;
+      });
+      if (selected.length >= LAG_MOVE_BAND_COND_MIN_N) {
+        matched = true;
+        break;
+      }
+      ratio *= 1.5;
+    }
+    if (selected.length < LAG_MOVE_BAND_COND_MIN_N) {
+      selected = pool;
+      matched = false;
     }
   }
 
-  const lag = outlookLagDays();
-  const lastWeekIso = weeks[weeks.length - 1].weekEnding;
-  let etaHint;
-  if (turnIdx >= 0) {
-    const turnIso = weeks[turnIdx].weekEnding;
-    const daysSince = Math.max(0, isoToDayNum(lastWeekIso) - isoToDayNum(turnIso));
-    const remaining = Math.max(0, lag - daysSince);
-    etaHint =
-      remaining > 0
-        ? `Singapore turned ~${daysSince}d ago · AU typically ~${lag}d behind · next turn ~${remaining}d`
-        : `Singapore turned ~${daysSince}d ago · AU lag ~${lag}d may already be showing`;
-  } else {
-    const dirWord =
-      direction === 'rising' ? 'rising' : direction === 'falling' ? 'falling' : 'flat';
-    etaHint = `Tracking ${dirWord} · AU usually lags Singapore by ~${lag} days`;
+  const resid = selected.map((p) => p.r).sort((a, b) => a - b);
+  const lo = quantileSorted(resid, pLo);
+  const hi = quantileSorted(resid, pHi);
+  return {
+    lo: lo != null ? Math.round(lo * 100) / 100 : null,
+    hi: hi != null ? Math.round(hi * 100) / 100 : null,
+    n: selected.length,
+    matched,
+  };
+}
+
+/** Business-day lead levels with dates (raw, no smooth). Optional as-of truncates history. */
+function leadBizDays(fuel, asOfIso) {
+  const days = leadDaysForFuel(fuel);
+  return days.filter((d) => {
+    if (asOfIso && d.date > asOfIso) return false;
+    const wd = isoWeekday(d.date);
+    return wd >= 1 && wd <= 5 && d.value != null && Number.isFinite(d.value);
+  });
+}
+
+/**
+ * Spike-aware settled Mogas move for amount bands.
+ * CME often prints a 1–2d spike then settles; use pre-spike → settled level,
+ * and mark provisional while still on/near the tip.
+ *
+ * Important: the large *unwind* day must not be treated as the spike itself
+ * (that would set baseline to the tip, e.g. 123→104 instead of 110→104).
+ *
+ * @returns {{
+ *   delta: number,
+ *   from: number,
+ *   to: number,
+ *   basis: string,
+ *   provisional: boolean,
+ *   spikeAbs?: number,
+ *   daysSinceSpike?: number
+ * } | null}
+ */
+function assessLeadEventMove(fuel, { direction, turnIso, asOfIso } = {}) {
+  const biz = leadBizDays(fuel, asOfIso);
+  if (biz.length < 3) return null;
+  const levels = biz.map((d) => d.value);
+  const n = levels.length;
+  const last = levels[n - 1];
+
+  const agrees = (d) => {
+    if (d == null || !Number.isFinite(d)) return false;
+    if (direction === 'falling') return d < -0.15;
+    if (direction === 'rising') return d > 0.15;
+    return Math.abs(d) >= 0.15;
+  };
+
+  const pack = (fromIdx, toIdx, basis, provisional, spikeAbs, daysSinceSpike) => {
+    const from = levels[fromIdx];
+    const to = levels[toIdx];
+    const delta = to - from;
+    if (!(agrees(delta) || direction === 'flat' || provisional)) return null;
+    return {
+      delta,
+      from,
+      to,
+      fromDate: biz[fromIdx].date,
+      toDate: biz[toIdx].date,
+      basis,
+      provisional: !!provisional,
+      spikeAbs,
+      daysSinceSpike,
+    };
+  };
+
+  // Prefer: large jump to a tip, then 1–2d unwind/hold → baseline = pre-tip.
+  for (let tipIdx = n - 1; tipIdx >= Math.max(1, n - 6); tipIdx--) {
+    const intoTip = levels[tipIdx] - levels[tipIdx - 1];
+    if (Math.abs(intoTip) < LEAD_SPIKE_ABS_MIN) continue;
+
+    const preIdx = tipIdx - 1;
+    const tip = levels[tipIdx];
+    const daysSinceSpike = n - 1 - tipIdx;
+
+    // Case A: today's/recent day is an *unwind* of a prior spike (prior day was the tip).
+    if (tipIdx >= 2) {
+      const priorIntoTip = levels[tipIdx - 1] - levels[tipIdx - 2];
+      if (
+        Math.abs(priorIntoTip) >= LEAD_SPIKE_ABS_MIN &&
+        Math.sign(priorIntoTip) !== 0 &&
+        Math.sign(intoTip) !== 0 &&
+        Math.sign(priorIntoTip) !== Math.sign(intoTip)
+      ) {
+        const reverseFrac = -intoTip / priorIntoTip;
+        if (reverseFrac >= LEAD_SPIKE_RETRACE_FRAC) {
+          const hit = pack(
+            tipIdx - 2,
+            n - 1,
+            'spike-settled',
+            false,
+            Math.abs(priorIntoTip),
+            daysSinceSpike + 1
+          );
+          if (hit) return hit;
+        }
+      }
+    }
+
+    // Case B: tipIdx is the spike tip; watch following days for settle/hold.
+    if (daysSinceSpike === 0) {
+      const hit = pack(preIdx, tipIdx, 'spike-provisional', true, Math.abs(intoTip), 0);
+      if (hit) return hit;
+      continue;
+    }
+
+    if (daysSinceSpike > LEAD_SPIKE_SETTLE_DAYS) {
+      continue;
+    }
+
+    const reversedFrac = Math.abs(intoTip) > 1e-6 ? (tip - last) / intoTip : 0;
+    const nearTip = Math.abs(last - tip) <= LEAD_SPIKE_TIP_FLAT;
+
+    if (reversedFrac >= LEAD_SPIKE_RETRACE_FRAC) {
+      const hit = pack(preIdx, n - 1, 'spike-settled', false, Math.abs(intoTip), daysSinceSpike);
+      if (hit) return hit;
+    } else if (nearTip) {
+      const hit = pack(preIdx, n - 1, 'spike-waiting', true, Math.abs(intoTip), daysSinceSpike);
+      if (hit) return hit;
+    } else {
+      const hit = pack(preIdx, n - 1, 'spike-held', false, Math.abs(intoTip), daysSinceSpike);
+      if (hit) return hit;
+    }
   }
 
+  // No usable spike: raw level change since turn (uncapped), else last 1–5d raw.
+  if (turnIso) {
+    let turnIdx = -1;
+    for (let i = 0; i < biz.length; i++) {
+      if (biz[i].date >= turnIso) {
+        turnIdx = i;
+        break;
+      }
+    }
+    if (turnIdx >= 0 && turnIdx < n - 1) {
+      const hit = pack(turnIdx, n - 1, 'since-turn-raw', false);
+      if (hit) return hit;
+    }
+  }
+
+  const lookback = Math.min(5, n - 1);
+  {
+    const hit = pack(n - 1 - lookback, n - 1, 'raw-window', false);
+    if (hit) return hit;
+  }
+
+  for (let i = n - 1; i >= 1; i--) {
+    const d = levels[i] - levels[i - 1];
+    if (agrees(d)) {
+      return {
+        delta: d,
+        from: levels[i - 1],
+        to: levels[i],
+        fromDate: biz[i - 1].date,
+        toDate: biz[i].date,
+        basis: 'last-day',
+        provisional: false,
+      };
+    }
+  }
+  return null;
+}
+
+function formatCPerLDelta(v) {
+  const r = Math.round(Number(v) * 10) / 10;
+  const sign = r > 0 ? '+' : '';
+  return `${sign}${r.toFixed(1)}`;
+}
+
+/**
+ * Weekly AIP Mogas/Gasoil move for amount bands (when Outlook bars use weekly).
+ * Uses change since last sign-flip week when known, else last week-to-week Δ.
+ */
+function assessWeeklyOutlookEventMove(fuel, { direction, turnIso, asOfIso } = {}) {
+  let weeks = outlookWeeksForFuel(fuel);
+  if (asOfIso) weeks = weeks.filter((w) => w.weekEnding <= asOfIso);
+  if (weeks.length < 2) return null;
+
+  const agrees = (d) => {
+    if (d == null || !Number.isFinite(d)) return false;
+    if (direction === 'falling') return d < -0.15;
+    if (direction === 'rising') return d > 0.15;
+    return Math.abs(d) >= 0.15;
+  };
+
+  const n = weeks.length;
+  let fromIdx = n - 2;
+  if (turnIso) {
+    const ti = weeks.findIndex((w) => w.weekEnding >= turnIso);
+    if (ti >= 0 && ti < n - 1) fromIdx = ti;
+  }
+  const from = weeks[fromIdx].value;
+  const to = weeks[n - 1].value;
+  const delta = to - from;
+  if (!(agrees(delta) || direction === 'flat')) return null;
+  return {
+    delta,
+    from,
+    to,
+    fromDate: weeks[fromIdx].weekEnding,
+    toDate: weeks[n - 1].weekEnding,
+    basis: turnIso && fromIdx < n - 2 ? 'weekly-since-turn' : 'weekly-last',
+    provisional: false,
+  };
+}
+
+/**
+ * Prediction band from lead/AIP Δ × through-origin slope.
+ * Residuals are size-matched to |lead Δ| when enough similar past moves exist.
+ * @returns {object | null}
+ */
+function predictMoveBand80(fuel, state, opts = {}) {
+  const st = String(state || '').toUpperCase();
+  const mb = calibratedLagMeta[st]?.moveBand;
+  if (!mb) return null;
+  const event =
+    opts.cadence === 'weekly'
+      ? assessWeeklyOutlookEventMove(fuel, opts)
+      : assessLeadEventMove(fuel, opts);
+  if (!event) return null;
+  const leadDelta = event.delta;
+  const b = Number.isFinite(mb.slopeThrough) ? mb.slopeThrough : mb.slope;
+  const pred = b * leadDelta;
+
+  const q80 = residualQuantilesForLead(mb, leadDelta, 0.1, 0.9);
+  const q50 = residualQuantilesForLead(mb, leadDelta, 0.25, 0.75);
+  const residP10 = q80.lo ?? mb.residP10;
+  const residP90 = q80.hi ?? mb.residP90;
+  const residP25 = q50.lo ?? mb.residP25;
+  const residP75 = q50.hi ?? mb.residP75;
+
+  let lo = pred + residP10;
+  let hi = pred + residP90;
+  if (lo > hi) {
+    const t = lo;
+    lo = hi;
+    hi = t;
+  }
+  if (opts.direction === 'falling' && hi > 0 && lo < 0) {
+    hi = 0;
+  } else if (opts.direction === 'rising' && lo < 0 && hi > 0) {
+    lo = 0;
+  } else if (opts.direction === 'falling' && lo >= 0 && !event.provisional) {
+    return null;
+  } else if (opts.direction === 'rising' && hi <= 0 && !event.provisional) {
+    return null;
+  }
+  return {
+    lo: Math.round(lo * 10) / 10,
+    hi: Math.round(hi * 10) / 10,
+    pred: Math.round(pred * 10) / 10,
+    leadDelta: Math.round(leadDelta * 10) / 10,
+    leadFrom: Math.round(event.from * 10) / 10,
+    leadTo: Math.round(event.to * 10) / 10,
+    leadFromDate: event.fromDate || null,
+    leadToDate: event.toDate || null,
+    residP10,
+    residP90,
+    residP25,
+    residP75,
+    residMatched: !!q80.matched,
+    residN: q80.n,
+    residN50: q50.n,
+    retDays: mb.retDays,
+    lag: mb.lag,
+    n: mb.n,
+    confidence: 80,
+    basis: event.basis,
+    provisional: !!event.provisional,
+    slopeThrough: b,
+    cadence: opts.cadence || 'daily',
+  };
+}
+
+function utcTodayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysBetweenIso(earlier, later) {
+  if (!earlier || !later) return null;
+  return Math.max(0, isoToDayNum(later) - isoToDayNum(earlier));
+}
+
+/** Shift an ISO date by signed calendar days. */
+function addDaysIso(iso, days) {
+  if (!iso || !Number.isFinite(days)) return null;
+  return dayNumToISO(isoToDayNum(iso) + Math.round(days));
+}
+
+/**
+ * Chart sticky day for Outlook replay, or null when on the live tip.
+ * @returns {string | null}
+ */
+function outlookChartAsOfIso() {
+  const series = chartCycleCtx.series;
+  const idx = chartCycleCtx.selectedIndex;
+  if (
+    series?.length &&
+    idx != null &&
+    idx >= 0 &&
+    idx < series.length - 1 &&
+    series[idx]?.date
+  ) {
+    return series[idx].date;
+  }
+  return null;
+}
+
+/** Expected pump |Δ| c/L from move band (same formula as the headline above the bar). */
+function outlookExpectedAmountCpl(signal) {
+  const band = signal?.moveBand;
+  if (!band) return null;
+  const mogasAbs = Math.abs(Number(band.leadDelta));
+  let amt = Math.abs(Number(band.pred));
+  if (!Number.isFinite(amt) || amt < 0.05) {
+    amt = Math.abs((Number(band.lo) + Number(band.hi)) / 2);
+  }
+  if (!Number.isFinite(amt)) return null;
+  if (Number.isFinite(mogasAbs) && mogasAbs > 0 && amt > mogasAbs) {
+    amt = mogasAbs;
+  }
+  return amt;
+}
+
+/** ± from residual quantiles; null if missing or ≥ |central estimate|. */
+function outlookErrFromResiduals(pLo, pHi, centralAmt) {
+  if (!Number.isFinite(pLo) || !Number.isFinite(pHi)) return null;
+  const err = Math.max(Math.abs(pLo), Math.abs(pHi));
+  if (!Number.isFinite(err) || err < 0.05) return null;
+  if (Number.isFinite(centralAmt) && err >= centralAmt) return null;
+  return Math.round(err * 10) / 10;
+}
+
+/** ±c/L for primary (size-matched 80%) band; omitted when noisier than the estimate. */
+function outlookExpectedAmountErrCpl(signal) {
+  const band = signal?.moveBand;
+  if (!band) return null;
+  return outlookErrFromResiduals(band.residP10, band.residP90, outlookExpectedAmountCpl(signal));
+}
+
+/** ±c/L for comparison 50% / IQR band. */
+function outlookExpectedAmountErr50Cpl(signal) {
+  const band = signal?.moveBand;
+  if (!band) return null;
+  return outlookErrFromResiduals(band.residP25, band.residP75, outlookExpectedAmountCpl(signal));
+}
+
+function formatExpectedAmountWithErr(signal, { provisional = false, coverage = 80 } = {}) {
+  const amt = outlookExpectedAmountCpl(signal);
+  if (amt == null) return null;
+  const err =
+    coverage <= 50
+      ? outlookExpectedAmountErr50Cpl(signal)
+      : outlookExpectedAmountErrCpl(signal);
+  const soft = provisional ? ' · provisional' : '';
+  const covLabel = coverage <= 50 ? '50% of past cases' : '80% of past cases';
+  if (err != null) {
+    return `~${amt.toFixed(1)}c/L (±${err.toFixed(1)}c, ${covLabel})${soft}`;
+  }
+  return `~${amt.toFixed(1)}c/L · size uncertain${soft}`;
+}
+
+function formatMoveBandHint(band, direction, signal) {
+  if (!band) return null;
+  const sig = signal || { moveBand: band };
+  const body = formatExpectedAmountWithErr(sig, {
+    provisional: !!band.provisional,
+    coverage: 80,
+  });
+  if (!body) return null;
+  return `Likely pump move: ${body}`;
+}
+
+function formatMoveBandCompare50(band, signal) {
+  if (!band) return null;
+  const sig = signal || { moveBand: band };
+  const body = formatExpectedAmountWithErr(sig, {
+    provisional: !!band.provisional,
+    coverage: 50,
+  });
+  if (!body) return null;
+  return `Compare (50% / IQR): ${body}`;
+}
+
+function formatMoveBandPlain(band) {
+  if (!band) return null;
+  const fmtLvl = (v) => (Math.round(Number(v) * 10) / 10).toFixed(1);
+  const label = band.cadence === 'weekly' ? 'AIP Mogas' : 'Mogas';
+  const stick =
+    Number.isFinite(band.leadFrom) && Number.isFinite(band.leadTo)
+      ? `${label} ${fmtLvl(band.leadFrom)}→${fmtLvl(band.leadTo)}`
+      : Number.isFinite(band.leadDelta)
+        ? `${label} ${formatCPerLDelta(band.leadDelta)}c`
+        : null;
+  if (!stick) return null;
+  if (band.cadence === 'weekly') return stick;
+  return band.provisional ? `Settling ${stick}` : `Settled ${stick}`;
+}
+
+function isoWeekday(iso) {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun..6=Sat
+}
+
+function movingAverage(values, window) {
+  const out = new Array(values.length).fill(null);
+  if (!(window >= 1)) return values.slice();
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= window) sum -= values[i - window];
+    if (i >= window - 1) out[i] = sum / window;
+  }
+  return out;
+}
+
+function rankArray(values) {
+  const indexed = values.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+  const ranks = new Array(values.length);
+  for (let i = 0; i < indexed.length; ) {
+    let j = i + 1;
+    while (j < indexed.length && indexed[j].v === indexed[i].v) j += 1;
+    const avgRank = (i + j - 1) / 2 + 1;
+    for (let k = i; k < j; k++) ranks[indexed[k].i] = avgRank;
+    i = j;
+  }
+  return ranks;
+}
+
+function pearsonCorr(xs, ys) {
+  const n = Math.min(xs.length, ys.length);
+  if (n < 12) return null;
+  let sx = 0;
+  let sy = 0;
+  for (let i = 0; i < n; i++) {
+    sx += xs[i];
+    sy += ys[i];
+  }
+  const mx = sx / n;
+  const my = sy / n;
+  let num = 0;
+  let dx = 0;
+  let dy = 0;
+  for (let i = 0; i < n; i++) {
+    const a = xs[i] - mx;
+    const b = ys[i] - my;
+    num += a * b;
+    dx += a * a;
+    dy += b * b;
+  }
+  if (dx < 1e-9 || dy < 1e-9) return null;
+  return num / Math.sqrt(dx * dy);
+}
+
+function spearmanCorr(xs, ys) {
+  return pearsonCorr(rankArray(xs), rankArray(ys));
+}
+
+/** Looser Spearman for sparse turn samples (still needs a handful of points). */
+function spearmanCorrLoose(xs, ys, minN = 8) {
+  const n = Math.min(xs.length, ys.length);
+  if (n < minN) return null;
+  return pearsonCorr(rankArray(xs.slice(0, n)), rankArray(ys.slice(0, n)));
+}
+
+function bestLagFromChanges(leadCh, avgCh, minL, maxL) {
+  let bestL = null;
+  let bestCorr = -Infinity;
+  let bestN = 0;
+  for (let L = minL; L <= maxL; L++) {
+    const xs = [];
+    const ys = [];
+    for (let i = 0; i + L < leadCh.length; i++) {
+      xs.push(leadCh[i]);
+      ys.push(avgCh[i + L]);
+    }
+    const corr = spearmanCorr(xs, ys);
+    if (corr == null) continue;
+    if (corr > bestCorr) {
+      bestCorr = corr;
+      bestL = L;
+      bestN = xs.length;
+    }
+  }
+  if (bestL == null || !Number.isFinite(bestCorr)) return null;
+  return { lag: bestL, corr: bestCorr, n: bestN };
+}
+
+/** Business-day pairs → smoothed multi-day changes. */
+function lagChangeSeries(pairs, smooth, retDays) {
+  const biz = pairs.filter((p) => {
+    const wd = isoWeekday(p.date);
+    return wd >= 1 && wd <= 5;
+  });
+  const lead = biz.map((p) => p.lead);
+  const avg = biz.map((p) => p.avg);
+  const leadSmooth = movingAverage(lead, smooth);
+  const avgSmooth = movingAverage(avg, smooth);
+  const leadCh = [];
+  const avgCh = [];
+  for (let i = retDays; i < biz.length; i++) {
+    if (leadSmooth[i] == null || leadSmooth[i - retDays] == null) continue;
+    if (avgSmooth[i] == null || avgSmooth[i - retDays] == null) continue;
+    leadCh.push(leadSmooth[i] - leadSmooth[i - retDays]);
+    avgCh.push(avgSmooth[i] - avgSmooth[i - retDays]);
+  }
+  return { leadCh, avgCh };
+}
+
+function leadTurnIndices(levels, thresh) {
+  const turns = [];
+  if (levels.length < 3) return turns;
+  const deltas = [];
+  for (let i = 1; i < levels.length; i++) deltas.push(levels[i] - levels[i - 1]);
+  for (let i = 1; i < deltas.length; i++) {
+    if (deltas[i - 1] === 0) continue;
+    if (Math.sign(deltas[i]) !== 0 && Math.sign(deltas[i - 1]) !== Math.sign(deltas[i])) {
+      if (Math.abs(deltas[i]) < thresh && Math.abs(deltas[i - 1]) < thresh) continue;
+      turns.push(i); // level index of turn day
+    }
+  }
+  return turns;
+}
+
+/** Turn-assisted lag: correlate lead moves around turns with avg moves L days later. */
+function calibrateTurnLag(pairs, minL, maxL) {
+  const lead = pairs.map((p) => p.lead);
+  const avg = pairs.map((p) => p.avg);
+  const leadSmooth = movingAverage(lead, 5);
+  const avgSmooth = movingAverage(avg, 5);
+  const turns = leadTurnIndices(lead, LAG_TURN_THRESH);
+  if (turns.length < 6) return null;
+
+  let bestL = null;
+  let bestCorr = -Infinity;
+  let bestN = 0;
+  const w = LAG_TURN_WINDOW;
+  for (let L = minL; L <= maxL; L++) {
+    const xs = [];
+    const ys = [];
+    for (const j of turns) {
+      if (j + L >= pairs.length || j < 1) continue;
+      const i0 = Math.max(0, j - w);
+      const i1 = j;
+      const j0 = Math.max(0, j + L - w);
+      const j1 = j + L;
+      if (
+        leadSmooth[i0] == null ||
+        leadSmooth[i1] == null ||
+        avgSmooth[j0] == null ||
+        avgSmooth[j1] == null
+      ) {
+        continue;
+      }
+      xs.push(leadSmooth[i1] - leadSmooth[i0]);
+      ys.push(avgSmooth[j1] - avgSmooth[j0]);
+    }
+    const corr = spearmanCorrLoose(xs, ys, 8);
+    if (corr == null) continue;
+    if (corr > bestCorr) {
+      bestCorr = corr;
+      bestL = L;
+      bestN = xs.length;
+    }
+  }
+  if (bestL == null || !Number.isFinite(bestCorr) || bestCorr < LAG_CALIB_MIN_R) return null;
+  return {
+    lag: bestL,
+    corr: Math.round(bestCorr * 1000) / 1000,
+    n: bestN,
+  };
+}
+
+/**
+ * Calibrate Singapore→AU lag: business-day multi-window daily fit, assisted by
+ * turn-based lag when it agrees or when daily is soft.
+ */
+function calibrateStateLag(state, fuel, stateSeries) {
+  const st = String(state || '').toUpperCase();
+  // Prefer cron-published calib when available (non-soft).
+  if (hasPublishedLag(st)) {
+    applyPublishedLagCalib();
+    return calibratedLagByState[st] ?? null;
+  }
+
+  const days = leadDaysForFuel(fuel);
+  if (!state || !days.length || !stateSeries?.length) return null;
+  const cfg = lagConfig();
+  const minL = Math.max(1, Math.round(Number(cfg.min) || 5));
+  const maxL = Math.max(minL, Math.round(Number(cfg.max) || 21));
+
+  delete calibratedLagByState[st];
+  delete calibratedLagMeta[st];
+
+  const leadByDate = new Map(days.map((d) => [d.date, d.value]));
+  const pairs = [];
+  for (const p of stateSeries) {
+    if (!p?.date || p.avg == null || !Number.isFinite(p.avg)) continue;
+    const lv = leadByDate.get(p.date);
+    if (lv == null) continue;
+    pairs.push({ date: p.date, lead: lv, avg: p.avg });
+  }
+  if (pairs.length < maxL + 40) return null;
+
+  let dailyBest = null;
+  for (const smooth of LAG_SMOOTH_GRID) {
+    for (const retDays of LAG_RET_GRID) {
+      const { leadCh, avgCh } = lagChangeSeries(pairs, smooth, retDays);
+      if (leadCh.length < maxL + 12) continue;
+      const hit = bestLagFromChanges(leadCh, avgCh, minL, maxL);
+      if (!hit) continue;
+      if (!dailyBest || hit.corr > dailyBest.corr) {
+        dailyBest = { ...hit, smooth, retDays };
+      }
+    }
+  }
+
+  const turnBest = calibrateTurnLag(pairs, minL, maxL);
+
+  if (
+    (!dailyBest || dailyBest.corr < LAG_CALIB_MIN_R) &&
+    !(turnBest && turnBest.corr >= LAG_TURN_ASSIST_R && turnBest.n >= LAG_TURN_MIN_N)
+  ) {
+    return null;
+  }
+
+  let lag = dailyBest?.lag ?? turnBest.lag;
+  let corr = dailyBest?.corr ?? turnBest.corr;
+  let n = dailyBest?.n ?? turnBest.n;
+  let soft = true;
+  let source = 'soft';
+
+  const dailyStrong = dailyBest && dailyBest.corr >= LAG_CALIB_STRONG_R;
+  const dailySoft =
+    dailyBest && dailyBest.corr >= LAG_CALIB_MIN_R && dailyBest.corr < LAG_CALIB_STRONG_R;
+  const turnStrong =
+    turnBest && turnBest.corr >= LAG_TURN_ASSIST_R && turnBest.n >= LAG_TURN_MIN_N;
+
+  if (dailyStrong && turnStrong && Math.abs(dailyBest.lag - turnBest.lag) <= LAG_TURN_AGREE_DAYS) {
+    const wDaily = dailyBest.n * dailyBest.corr;
+    const wTurn = turnBest.n * turnBest.corr;
+    lag = Math.round((dailyBest.lag * wDaily + turnBest.lag * wTurn) / (wDaily + wTurn));
+    corr = dailyBest.corr;
+    n = dailyBest.n;
+    soft = false;
+    source = 'merged';
+  } else if (dailyStrong) {
+    lag = dailyBest.lag;
+    corr = dailyBest.corr;
+    n = dailyBest.n;
+    soft = false;
+    source = 'daily';
+  } else if (dailySoft && turnStrong) {
+    lag = turnBest.lag;
+    corr = turnBest.corr;
+    n = turnBest.n;
+    soft = false;
+    source = 'turns';
+  } else if (dailySoft) {
+    lag = dailyBest.lag;
+    corr = dailyBest.corr;
+    n = dailyBest.n;
+    soft = true;
+    source = 'soft';
+  } else if (turnStrong) {
+    lag = turnBest.lag;
+    corr = turnBest.corr;
+    n = turnBest.n;
+    soft = false;
+    source = 'turns';
+  } else {
+    return null;
+  }
+
+  const corrRound = Math.round(corr * 1000) / 1000;
+  const bandSmooth = dailyBest?.smooth ?? 7;
+  const bandRetDays = dailyBest?.retDays ?? 7;
+  const moveBand = fitMoveBandModel(pairs, lag, bandSmooth, bandRetDays);
+  calibratedLagMeta[st] = {
+    corr: corrRound,
+    n,
+    lag,
+    soft,
+    source,
+    turns: turnBest,
+    moveBand,
+  };
+  if (!soft) calibratedLagByState[st] = lag;
+  return soft ? null : lag;
+}
+
+/**
+ * Simple Outlook signal: last AIP weekly Mogas/Gasoil week-to-week move.
+ * Bar maps Δ onto ±OUTLOOK_BAR_SCALE_CPL at the Falling/Rising extremes.
+ * Pass asOfIso to replay as of a chart hover day.
+ */
+function outlookAipLastMoveSignal(fuel, state, { asOfIso = null } = {}) {
+  let weeks = outlookWeeksForFuel(fuel);
+  if (asOfIso) weeks = weeks.filter((w) => w.weekEnding <= asOfIso);
+  if (weeks.length < 2) return null;
+
+  let toIdx = -1;
+  for (let i = weeks.length - 1; i >= 1; i--) {
+    if (Math.abs(weeks[i].value - weeks[i - 1].value) >= 0.05) {
+      toIdx = i;
+      break;
+    }
+  }
+  if (toIdx < 1) toIdx = weeks.length - 1;
+
+  const from = weeks[toIdx - 1];
+  const to = weeks[toIdx];
+  const delta = to.value - from.value;
+  const direction =
+    delta > 0.05 ? 'rising' : delta < -0.05 ? 'falling' : 'flat';
+  const scale = OUTLOOK_BAR_SCALE_CPL;
+  let pct = 50 + (delta / scale) * 50;
+  pct = Math.max(0, Math.min(100, pct));
+
+  const st = (state || document.getElementById('stateSelect')?.value || '').toUpperCase();
+  const lag = outlookLagDays(st);
+  const scope = selectedScope() || '';
   return {
     pct,
     direction,
-    confidence,
-    lastDelta: Math.round(last * 10) / 10,
-    lastValue: weeks[weeks.length - 1].value,
-    lastWeekIso,
-    source: weeks[weeks.length - 1].source,
-    commodity: outlookCommodityLabel(fuel),
-    etaHint,
+    delta: Math.round(delta * 10) / 10,
+    moveDate: to.weekEnding,
+    fromValue: from.value,
+    toValue: to.value,
     lag,
+    lagNote: lagNoteForState(st, lag),
+    state: st || null,
+    scope: scope || null,
+    asOfIso: asOfIso || null,
+    commodity: outlookCommodityLabel(fuel),
   };
+}
+
+function formatOutlookMoveHeadline(signal) {
+  if (!signal) return null;
+  const amt = Math.abs(Number(signal.delta));
+  const amtStr = Number.isFinite(amt) ? amt.toFixed(1) : '—';
+  const date = signal.moveDate || '—';
+  if (signal.direction === 'rising') return `Rose ${amtStr}c/L on ${date}`;
+  if (signal.direction === 'falling') return `Fell ${amtStr}c/L on ${date}`;
+  return `Unchanged on ${date}`;
+}
+
+function formatOutlookLagLine(signal) {
+  if (!signal) return null;
+  const st = signal.state || 'AU';
+  const scope = signal.scope ? ` ${signal.scope}` : '';
+  return `${st}${scope} typically lags AIP Mogas by ~${signal.lagNote}`;
 }
 
 function renderOutlookBarHtml(signal) {
   if (!signal) {
-    return `<div class="area-rank-bar outlook-bar"><div class="area-rank-title">Outlook</div><p class="outlook-hint">No Singapore bench loaded. Run fetch-aip-outlook or check docs/v1/outlook.json.</p></div>`;
+    return `<div class="area-rank-bar outlook-bar"><div class="area-rank-title">Outlook</div><p class="outlook-hint">No AIP weekly loaded. Check Data base URL / v1/outlook.json.</p></div>`;
   }
   const pct = signal.pct;
-  const markerClass = 'area-rank-marker';
-  const dirLabel =
-    signal.direction === 'rising'
-      ? 'Rising'
-      : signal.direction === 'falling'
-        ? 'Falling'
-        : 'Flat';
+  const headline = formatOutlookMoveHeadline(signal);
+  const lagText = formatOutlookLagLine(signal);
+  const moveLine = `<p class="outlook-countdown">${headline ? escapeHtml(headline) : '&nbsp;'}</p>`;
+  const lagLine = `<p class="outlook-expected">${lagText ? escapeHtml(lagText) : '&nbsp;'}</p>`;
+  const asOfLine = `<p class="outlook-asof">${
+    signal.asOfIso ? escapeHtml(`as of ${signal.asOfIso}`) : '&nbsp;'
+  }</p>`;
   return `
-    <div class="area-rank-bar outlook-bar" role="img" aria-label="Outlook ${escapeHtml(signal.commodity)}">
-      <div class="area-rank-title">Outlook · ${escapeHtml(signal.commodity)}</div>
+    <div class="area-rank-bar outlook-bar" role="img" aria-label="Outlook">
+      <div class="area-rank-title">Outlook</div>
+      ${asOfLine}
+      ${moveLine}
+      ${lagLine}
       <div class="bar-labels"><span class="falling">Falling</span><span class="rising">Rising</span></div>
       <div class="area-rank-track">
-        <div class="${markerClass}" style="left:${pct.toFixed(1)}%"></div>
+        <div class="area-rank-marker" style="left:${pct.toFixed(1)}%"></div>
       </div>
-      <p class="outlook-hint">${escapeHtml(signal.etaHint)}</p>
-      <p class="outlook-meta">${dirLabel} · Δ ${signal.lastDelta > 0 ? '+' : ''}${signal.lastDelta}c last week · ${signal.lastValue}c · week ${escapeHtml(signal.lastWeekIso)}${signal.source ? ` · ${escapeHtml(signal.source)}` : ''}</p>
     </div>
   `;
 }
@@ -2613,13 +3717,17 @@ function renderOutlookBar() {
   const el = document.getElementById('outlookBar');
   if (!el) return;
   const fuel = document.getElementById('fuelSelect')?.value || 'U91';
+  const state = document.getElementById('stateSelect')?.value || '';
   if (fuel === 'LPG') {
     el.innerHTML = '';
     el.classList.add('hidden');
     return;
   }
+  const chartAsOf = outlookChartAsOfIso();
   el.classList.remove('hidden');
-  el.innerHTML = renderOutlookBarHtml(outlookTrendSignal(fuel));
+  el.innerHTML = renderOutlookBarHtml(
+    outlookAipLastMoveSignal(fuel, state, { asOfIso: chartAsOf })
+  );
 }
 
 function latestFavouritesBand(fuel) {
@@ -3061,6 +4169,8 @@ function latestAreaMeanForFuel(fuel) {
   return null;
 }
 
+const cheapestStationsFoldOpen = Object.create(null);
+
 function renderCheapestStationsBlock(rowsByFuel, opts = {}) {
   const lines = [];
   for (const fuel of SUMMARY_FUELS) {
@@ -3093,10 +4203,14 @@ function renderCheapestStationsBlock(rowsByFuel, opts = {}) {
     );
   }
   const title = opts.title || 'Cheapest';
+  const foldKey = opts.foldKey || title;
+  const openAttr = cheapestStationsFoldOpen[foldKey] ? ' open' : '';
   return `
     <div class="scope-cheapest-stations">
-      <div class="e10-head"><strong>${escapeHtml(title)}</strong></div>
-      ${lines.join('')}
+      <details class="tune-fold cheapest-stations-fold" data-fold-key="${escapeHtml(foldKey)}"${openAttr}>
+        <summary>${escapeHtml(title)}</summary>
+        <div class="cheapest-stations-body">${lines.join('')}</div>
+      </details>
     </div>
   `;
 }
@@ -3113,6 +4227,7 @@ function renderScopeCheapestStationsHtml(state) {
   return renderCheapestStationsBlock(rows, {
     title: `Cheapest in ${state || ''} ${scopeWord}`.trim(),
     hideBestBuy: true,
+    foldKey: 'state',
   });
 }
 
@@ -3126,6 +4241,7 @@ function renderAreaCheapestStationsHtml() {
   return renderCheapestStationsBlock(rows, {
     title: `Cheapest in suburb (${selectedAreaRadiusKm()} km)`,
     hideBestBuy: true,
+    foldKey: 'suburb',
   });
 }
 
@@ -3144,6 +4260,7 @@ function renderFavouritesCheapestStationsHtml() {
   return renderCheapestStationsBlock(rows, {
     title: 'Cheapest in favourites',
     hideBestBuy: true,
+    foldKey: 'favs',
   });
 }
 
@@ -3716,6 +4833,8 @@ async function refreshCharts() {
     : null;
   marks.stationTurns = stationMarks.turns || [];
 
+  calibrateStateLag(state, fuel, fullSeries);
+
   renderHistoryChart(
     labels,
     series,
@@ -3770,6 +4889,8 @@ async function loadAllStates() {
   }
 
   await loadOutlookData();
+  await loadLeadData();
+  await loadLagCalibData();
 
   setStatus(`Loaded ${index.states.length} states · window ${index.windowDays} days · ${index.source?.slice(0, 80)}...`);
   applyUserPrefsToControls({ initial: !prefsAppliedOnce });
@@ -4623,12 +5744,14 @@ function persistControlsToPrefs() {
       favHigh: document.getElementById('showFavHigh')?.checked !== false,
       station: document.getElementById('showStation')?.checked !== false,
       mogas: document.getElementById('showMogas')?.checked !== false,
+      lead: document.getElementById('showLead')?.checked !== false,
     },
     turnLines: {
       state: document.getElementById('showStateTurns')?.checked !== false,
       suburb: document.getElementById('showSuburbTurns')?.checked !== false,
       fav: document.getElementById('showFavTurns')?.checked !== false,
       station: document.getElementById('showStationTurns')?.checked !== false,
+      fft: document.getElementById('showFftCurves')?.checked !== false,
     },
   });
 }
@@ -4676,24 +5799,37 @@ function ingestSuburbPayload(data) {
 async function ensureSuburbIndex() {
   if (suburbIndexLoaded && suburbIndex.length) return suburbIndex;
 
-  // Prefer embedded script (works with file:// — no local server required).
-  if (window.AFW_SUBURBS) {
-    ingestSuburbPayload(window.AFW_SUBURBS);
-    if (suburbIndex.length) return suburbIndex;
+  // Prefer live JSON over the embed (same Pages-first idea; suburbs live next to
+  // the viewer today, with optional v1/ publish later).
+  const tryIngest = (data, label) => {
+    ingestSuburbPayload(data);
+    if (suburbIndex.length) return true;
+    console.warn(`${label} loaded but contained no rows`);
+    return false;
+  };
+
+  try {
+    const remote = await fetchJson(`${baseUrl()}/v1/au-suburbs.json`);
+    if (tryIngest(remote, 'v1/au-suburbs.json')) return suburbIndex;
+  } catch {
+    /* not published on Pages yet — fine */
   }
 
   const url = viewerAssetUrl('au-suburbs.json');
   try {
     const data = await fetchJson(url);
-    ingestSuburbPayload(data);
-    if (!suburbIndex.length) {
-      console.warn('au-suburbs.json loaded but contained no rows', url);
-    }
+    if (tryIngest(data, url)) return suburbIndex;
   } catch (err) {
     console.warn('au-suburbs.json:', err.message, url);
-    suburbIndex = [];
-    suburbIndexLoaded = false;
   }
+
+  if (window.AFW_SUBURBS) {
+    ingestSuburbPayload(window.AFW_SUBURBS);
+    if (suburbIndex.length) return suburbIndex;
+  }
+
+  suburbIndex = [];
+  suburbIndexLoaded = false;
   return suburbIndex;
 }
 
@@ -4885,7 +6021,7 @@ async function refreshSuburbSuggest(query, activeIdx = 0) {
       box.classList.remove('hidden');
       setSuburbComboOpen(true);
       box.innerHTML =
-        '<div class="suburb-suggest-empty">Suburb list failed to load. Hard-refresh so <code>au-suburbs-data.js</code> is present.</div>';
+        '<div class="suburb-suggest-empty">Suburb list failed to load. Check Data base URL / network, or hard-refresh so <code>au-suburbs.json</code> is available.</div>';
     }
     return [];
   }
@@ -5093,6 +6229,7 @@ function applyUserPrefsToControls(opts = {}) {
     favHigh: 'showFavHigh',
     station: 'showStation',
     mogas: 'showMogas',
+    lead: 'showLead',
   };
   if (prefs.graphLines) {
     for (const [key, id] of Object.entries(lineMap)) {
@@ -5107,6 +6244,7 @@ function applyUserPrefsToControls(opts = {}) {
     suburb: 'showSuburbTurns',
     fav: 'showFavTurns',
     station: 'showStationTurns',
+    fft: 'showFftCurves',
   };
   if (prefs.turnLines) {
     for (const [key, id] of Object.entries(turnMap)) {
@@ -5405,6 +6543,8 @@ function init() {
   initWaWeeklyAfterLastControl();
   initArcpathTuneControls();
   initTuneFoldHeightSync();
+  initOutlookDetailsFoldSync();
+  initCheapestStationsFoldSync();
   initSuburbSearchControls();
   ensureSuburbIndex()
     .then((rows) => {
@@ -5468,6 +6608,11 @@ function init() {
     persistControlsToPrefs();
     applyTurnLineVisibility();
   };
+  const onFftCurvesChange = () => {
+    persistControlsToPrefs();
+    // Rebuild so curves are present when enabled (they may not exist on the chart yet).
+    refreshCharts().catch((e) => setStatus(`Error: ${e.message}`));
+  };
   document.getElementById('showAvg').onchange = onGraphLineChange;
   document.getElementById('showGmean').onchange = onGraphLineChange;
   document.getElementById('showMode').onchange = onGraphLineChange;
@@ -5479,6 +6624,7 @@ function init() {
   document.getElementById('showAreaHigh').onchange = onGraphLineChange;
   document.getElementById('showStation').onchange = onGraphLineChange;
   document.getElementById('showMogas')?.addEventListener('change', onGraphLineChange);
+  document.getElementById('showLead')?.addEventListener('change', onGraphLineChange);
   document.getElementById('showFavMean').onchange = onGraphLineChange;
   document.getElementById('showFavLow').onchange = onGraphLineChange;
   document.getElementById('showFavHigh').onchange = onGraphLineChange;
@@ -5486,6 +6632,7 @@ function init() {
   document.getElementById('showSuburbTurns').onchange = onTurnLineChange;
   document.getElementById('showFavTurns').onchange = onTurnLineChange;
   document.getElementById('showStationTurns').onchange = onTurnLineChange;
+  document.getElementById('showFftCurves')?.addEventListener('change', onFftCurvesChange);
   let areaRadiusTimer = null;
   const onAreaRadiusChange = () => {
     clearTimeout(areaRadiusTimer);
