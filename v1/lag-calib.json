@@ -1,0 +1,73 @@
+{
+  "source": "lead.json vs published state means (metro preferred)",
+  "updated": "2026-09-15",
+  "windowDays": 180,
+  "fuel": "U91",
+  "leadKey": "mogas95",
+  "lagDays": {
+    "default": 10,
+    "min": 5,
+    "max": 21,
+    "byState": {
+      "NSW": 6,
+      "VIC": 11,
+      "QLD": 6,
+      "WA": 6,
+      "SA": 10,
+      "TAS": 12,
+      "NT": 10,
+      "ACT": 5
+    }
+  },
+  "byState": {
+    "NSW": {
+      "lag": 6,
+      "corr": 0.705,
+      "n": 56,
+      "soft": false,
+      "source": "daily",
+      "scope": "metro",
+      "fuel": "U91",
+      "leadKey": "mogas95",
+      "turns": null
+    },
+    "QLD": {
+      "lag": 6,
+      "corr": 0.681,
+      "n": 55,
+      "soft": false,
+      "source": "daily",
+      "scope": "metro",
+      "fuel": "U91",
+      "leadKey": "mogas95",
+      "turns": null
+    },
+    "WA": {
+      "lag": 6,
+      "corr": 0.695,
+      "n": 55,
+      "soft": false,
+      "source": "merged",
+      "scope": "metro",
+      "fuel": "U91",
+      "leadKey": "mogas95",
+      "turns": {
+        "lag": 5,
+        "corr": 0.797,
+        "n": 12
+      }
+    },
+    "ACT": {
+      "lag": 5,
+      "corr": 0.721,
+      "n": 55,
+      "soft": false,
+      "source": "daily",
+      "scope": "metro",
+      "fuel": "U91",
+      "leadKey": "mogas95",
+      "turns": null
+    }
+  },
+  "generated": "2026-09-15T11:13:00.301Z"
+}

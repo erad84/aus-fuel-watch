@@ -10,14 +10,14 @@
     "min": 5,
     "max": 21,
     "byState": {
-      "NSW": 10,
+      "NSW": 6,
       "VIC": 11,
-      "QLD": 9,
-      "WA": 7,
+      "QLD": 6,
+      "WA": 6,
       "SA": 10,
       "TAS": 12,
       "NT": 10,
-      "ACT": 10
+      "ACT": 5
     }
   },
   "days": [
@@ -3016,16 +3016,17 @@
       "gasoil": 160.4,
       "gasoilSource": "cme",
       "gasoilUsd": 181.842,
-      "fxAudUsd": 0.713114
+      "fxAudUsd": 0.713216
     }
   ],
   "lastFetch": {
-    "at": "2026-09-15T11:06:02.827Z",
+    "at": "2026-09-15T11:13:00.224Z",
     "liveIso": "2026-09-15",
     "mogas95Usd": 118.469,
     "gasoilUsd": 181.842,
     "dayCount": 327,
     "mogasCmeDays": 3,
     "gasoilCmeDays": 3
-  }
+  },
+  "lagCalibUpdated": "2026-09-15T11:13:00.301Z"
 }
