@@ -91,9 +91,28 @@ and the UI degrades with it. Cycle params are fitted from **our own collected se
 E10 is about **3% less energy-dense** per litre than U91. The watch compares both when a station
 (or state average) lists them: E10 only wins if its price is more than ~3% below U91
 (`E10 < U91 × 0.97` in the same units). Otherwise U91 is the better buy for money, even when E10
-looks slightly cheaper on the board. Logic lives in `data/lib/e10Economics.js` and
-`src/pkjs/e10Economics.js`. At favourite stations (phone settings / area API later), the same rule
-applies per site.
+looks slightly cheaper on the board. LPG uses the same rule with a **25%** energy gap
+(`LPG_ENERGY_RATIO = 0.75`). Logic lives in `data/lib/fuelEconomics.js` and
+`src/pkjs/fuelEconomics.js` (and thin `e10Economics` re-exports). At favourite stations (phone
+settings / area API later), the same rule applies per site.
+
+### Scope snapshot (phone + viewer)
+
+Each collect run embeds a `snapshot` block in `{STATE}.json` with per-scope
+`totalStations`, per-fuel stocking `n`, cheapest station, and E10/LPG vs U91 compare blobs.
+The watch and viewer should read this for “today’s summary” without downloading
+`v1/stations/.../days/*.json` (those remain map / suburb / favourites history only).
+
+**Minimal phone fetch set**
+
+| Need | Fetch |
+| --- | --- |
+| Today’s scope mean, direction, range | `{STATE}.json` series + `params` |
+| Cheapest in metro / fuel compares / counts | `{STATE}.json` → `snapshot.scopes[scope]` |
+| Favourite station prices | one latest day file per fav state (user-specific) |
+| Suburb band | on demand (viewer); not required for watch home |
+
+Prices in `snapshot` are tenths of a cent (same as series).
 
 ## Data sources and attribution
 
@@ -158,3 +177,44 @@ Everything is committed locally on `main`; published JSON lives on branch `data`
 
 Scheduled times (UTC): 23:07, 02:37, 06:07. The `heartbeat` workflow keeps crons alive
 past GitHub's 60-day inactivity cutoff.
+
+## Pebble watchapp
+
+Targets **basalt** (Time / Time 2) and **chalk** (Time Round / Round 2); **aplite** is
+best-effort. The phone companion (`src/pkjs`) fetches `{dataBase}/v1/` with a **3-hour
+cache**, builds a compact AppMessage payload, and opens
+[`viewer/settings.html`](https://erad84.github.io/aus-fuel-watch/viewer/settings.html)
+on GitHub Pages (map, suburb, favs, fuel, theme, Costco, radii). Dial stage uses viewer
+**defaults** (`arcpath` + default turn tunes) — those controls are not in the settings UI.
+
+### Build / sideload
+
+Requires the [Pebble SDK](https://developer.rebble.io/) (or Rebble toolchain) and Node:
+
+```bash
+cd "/mnt/e/Mark/webdev/Pebble watch/Aus Fuel Watch"
+npm install   # if using pebble-tool wrappers
+pebble build
+pebble install --phone <ip>   # or emulator
+```
+
+Output: `build/aus-fuel-watch.pbw`.
+
+### Watch navigation
+
+| Action | Screen |
+| --- | --- |
+| Open | Main: title, cycle dial, rank bar, Best Buy |
+| Up | 90d scope mean graph → default station graph |
+| Down | Top 5 favs → suburb → state/scope |
+| Select | Near-me (GPS) list |
+| Back | Previous |
+
+On touch-capable Round builds, swipe/tap mirrors Up / Down / Select / Back.
+
+### Companion unit tests
+
+```bash
+node src/pkjs/test_pack.js
+```
+

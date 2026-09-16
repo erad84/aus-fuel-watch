@@ -3,7 +3,7 @@
   const STORAGE_KEY = 'afw.userPrefs';
   const LAST_GOOD_KEY = 'afw.lastGoodPayload';
   const SCOPES = new Set(['metro', 'regional', 'state']);
-  const FUELS = new Set(['U91', 'E10', 'P95', 'P98', 'DSL', 'PDSL', 'LPG']);
+  const FUELS = new Set(['U91', 'E10', 'P95', 'P98', 'DSL', 'PDSL', 'LPG', 'U91+E10', 'U91+LPG']);
 
   function emptyPrefs() {
     return {
@@ -14,7 +14,7 @@
       periodDays: 90,
       favourites: [],
       defaultFavouriteId: null,
-      excludeCostco: false,
+      excludeCostco: true,
       areaPostcode: null,
       areaSuburb: null,
       areaState: null,
@@ -22,6 +22,8 @@
       areaLat: null,
       areaLng: null,
       areaRadiusKm: 15,
+      gpsRadiusKm: 15,
+      watchTheme: 'dark',
       graphLines: {
         avg: true,
         gmean: false,
@@ -46,6 +48,7 @@
         station: true,
         fft: true,
       },
+      compareFolds: {},
     };
   }
 
@@ -93,7 +96,11 @@
     if (!base.defaultFavouriteId && base.favourites.length) {
       base.defaultFavouriteId = base.favourites[0].id;
     }
-    base.excludeCostco = !!raw.excludeCostco;
+    base.excludeCostco = raw.excludeCostco !== undefined ? !!raw.excludeCostco : true;
+    const gr = Number(raw.gpsRadiusKm);
+    if (Number.isFinite(gr) && gr >= 1 && gr <= 100) {
+      base.gpsRadiusKm = Math.round(gr);
+    }
     if (raw.areaPostcode != null && String(raw.areaPostcode).trim()) {
       base.areaPostcode = String(raw.areaPostcode).trim();
     }
@@ -116,6 +123,9 @@
     if (Number.isFinite(ar) && ar >= 1 && ar <= 100) {
       base.areaRadiusKm = Math.round(ar);
     }
+    if (raw.watchTheme === 'light' || raw.watchTheme === 'dark') {
+      base.watchTheme = raw.watchTheme;
+    }
     if (raw.graphLines && typeof raw.graphLines === 'object') {
       for (const key of Object.keys(base.graphLines)) {
         if (Object.prototype.hasOwnProperty.call(raw.graphLines, key)) {
@@ -129,6 +139,15 @@
           base.turnLines[key] = !!raw.turnLines[key];
         }
       }
+    }
+    if (raw.compareFolds && typeof raw.compareFolds === 'object') {
+      const folds = {};
+      for (const [k, v] of Object.entries(raw.compareFolds)) {
+        const key = String(k || '').trim();
+        if (!key) continue;
+        folds[key] = !!v;
+      }
+      base.compareFolds = folds;
     }
     return base;
   }

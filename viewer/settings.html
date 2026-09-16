@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Aus Fuel Watch — Settings</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <header>
+    <h1>Aus Fuel Watch</h1>
+    <p class="sub">Phone settings for the watch</p>
+  </header>
+
+  <main>
+    <section class="block">
+      <button type="button" id="btnDownloadLatest" class="primary">Download latest</button>
+      <p class="hint" id="cacheStatus">Cache: checking…</p>
+    </section>
+
+    <section class="block">
+      <label>Watch theme
+        <select id="watchTheme">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="block">
+      <label>Favourite fuel
+        <select id="fuelSelect">
+          <option value="U91">U91</option>
+          <option value="E10">E10</option>
+          <option value="P95">P95</option>
+          <option value="P98">P98</option>
+          <option value="DSL">DSL</option>
+          <option value="PDSL">PDSL</option>
+          <option value="LPG">LPG</option>
+          <option value="U91+E10">U91 + E10</option>
+          <option value="U91+LPG">U91 + LPG</option>
+        </select>
+      </label>
+      <p class="hint">U91 + E10 / LPG only change Best Buy compare on the watch.</p>
+    </section>
+
+    <section class="block">
+      <label>State / scope
+        <select id="scopeCombo"></select>
+      </label>
+    </section>
+
+    <section class="block">
+      <label>Suburb or postcode
+        <input id="suburbQuery" type="search" autocomplete="off" placeholder="e.g. 2000 or Surry Hills" />
+      </label>
+      <div id="suburbSuggest" class="suggest"></div>
+      <label>Suburb radius (km)
+        <input id="areaRadiusKm" type="number" min="1" max="100" value="15" />
+      </label>
+    </section>
+
+    <section class="block">
+      <h2>Favourites</h2>
+      <ul id="favList" class="fav-list"></ul>
+      <h2>Default station</h2>
+      <p id="defaultStation" class="default-station">None — set from map</p>
+      <button type="button" id="btnClearDefault" class="secondary">Clear default</button>
+    </section>
+
+    <section class="block">
+      <label class="check">
+        <input id="excludeCostco" type="checkbox" checked />
+        Exclude Costco
+      </label>
+      <label>Near-me GPS radius (km)
+        <input id="gpsRadiusKm" type="number" min="1" max="100" value="15" />
+      </label>
+    </section>
+
+    <section class="block map-block">
+      <h2>Stations map</h2>
+      <p class="hint">Zoom in to load pins. Tap a pin to add favourite / set default.</p>
+      <div id="map"></div>
+      <div id="stationPopup" class="station-popup hidden">
+        <p id="popupName"></p>
+        <button type="button" id="btnAddFav" class="secondary">Add favourite</button>
+        <button type="button" id="btnSetDefault" class="secondary">Set as default</button>
+        <button type="button" id="btnClosePopup" class="secondary">Close</button>
+      </div>
+    </section>
+
+    <section class="block actions">
+      <button type="button" id="btnSave" class="primary">Save &amp; close</button>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="brands.js"></script>
+  <script src="userPrefs.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

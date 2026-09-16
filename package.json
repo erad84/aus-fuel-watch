@@ -1,0 +1,63 @@
+{
+  "name": "aus-fuel-watch",
+  "author": "Aus Fuel Watch",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "pebble": {
+    "displayName": "Aus Fuel Watch",
+    "uuid": "a8f4e2c1-9b3d-4e6f-8a1b-2c3d4e5f6071",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "basalt",
+      "chalk",
+      "aplite"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "capabilities": [
+      "configurable",
+      "location"
+    ],
+    "messageKeys": [
+      "TITLE",
+      "FUEL",
+      "HOME_CTX",
+      "DIAL_ANGLE",
+      "DIAL_LABEL",
+      "BAR_LOW",
+      "BAR_HIGH",
+      "BAR_PRICE",
+      "BEST_PRICE",
+      "BEST_NAME",
+      "COMPARE_LINE",
+      "AS_OF",
+      "STALE",
+      "GRAPH_KIND",
+      "GRAPH_MIN",
+      "GRAPH_MAX",
+      "GRAPH_N",
+      "GRAPH_PTS",
+      "LIST_KIND",
+      "LIST_JSON",
+      "REQUEST",
+      "PREFS_JSON",
+      "STATUS",
+      "THEME"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "png",
+          "name": "IMAGE_MENU_ICON",
+          "file": "images/menu_icon.png",
+          "menuIcon": true
+        }
+      ]
+    }
+  }
+}
