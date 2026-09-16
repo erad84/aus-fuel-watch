@@ -49,6 +49,5 @@
  "stations": {
   "index": "stations/index.json",
   "note": "Per-station daily prices (not downloaded by the watch)"
- },
- "snapshot": "embedded in {STATE}.json — cheapest, counts, E10/LPG vs U91 per scope"
+ }
 }
