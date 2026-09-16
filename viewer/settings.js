@@ -207,39 +207,60 @@
     } catch (_) {}
     try {
       const r = await fetch('au-suburbs.json');
-      const data = await r.json();
-      suburbIndex = ingestSuburbs(data);
-    } catch (e) {
-      console.warn('suburbs', e);
+      if (r.ok) {
+        const data = await r.json();
+        suburbIndex = ingestSuburbs(data);
+        if (suburbIndex.length) return;
+      }
+    } catch (_) {}
+    if (window.AFW_SUBURBS) {
+      suburbIndex = ingestSuburbs(window.AFW_SUBURBS);
+      if (suburbIndex.length) return;
     }
+    console.warn('suburbs: no index loaded');
   }
 
   function ingestSuburbs(data) {
-    const rows = data && data.suburbs ? data.suburbs : [];
-    return rows.map((row) => ({
-      suburb: row.s,
-      postcode: row.p,
-      state: row.st,
-      lat: row.lat,
-      lng: row.lng,
-      label: `${row.s} ${row.p} ${row.st}`,
-    }));
+    const rows = data && data.suburbs ? data.suburbs : Array.isArray(data) ? data : [];
+    return rows
+      .map((row) => {
+        const suburb = String(row.s || row.suburb || '').trim();
+        const postcode = String(row.p ?? row.postcode ?? '').padStart(4, '0');
+        const state = String(row.st || row.state || '').toUpperCase();
+        const lat = Number(row.lat);
+        const lng = Number(row.lng);
+        if (!suburb || !postcode || postcode === '0000' || !state) return null;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return {
+          suburb,
+          postcode,
+          state,
+          lat,
+          lng,
+          label: `${suburb} ${postcode} ${state}`,
+        };
+      })
+      .filter(Boolean);
   }
 
   function searchSuburbs(q) {
     const query = String(q || '').trim().toLowerCase();
     if (query.length < 2) return [];
+    const stFilter = (document.getElementById('scopeCombo')?.value || '').split('|')[0];
     const out = [];
+    const starts = [];
     for (const row of suburbIndex) {
-      if (
-        row.label.toLowerCase().includes(query) ||
-        String(row.postcode).startsWith(query)
-      ) {
+      if (stFilter && row.state !== stFilter) continue;
+      const label = row.label.toLowerCase();
+      const pc = String(row.postcode);
+      if (pc.startsWith(query) || row.suburb.toLowerCase().startsWith(query)) {
+        starts.push(row);
+      } else if (label.includes(query)) {
         out.push(row);
-        if (out.length >= 30) break;
       }
+      if (starts.length + out.length >= 40) break;
     }
-    return out;
+    return starts.concat(out).slice(0, 30);
   }
 
   function setSuburb(row) {
