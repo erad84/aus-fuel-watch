@@ -1,0 +1,106 @@
+:root {
+  --bg: #0f1419;
+  --panel: #1a2332;
+  --text: #e8edf4;
+  --muted: #8b9cb3;
+  --accent: #3d9cf5;
+  --border: #2a3544;
+  --danger: #ef4444;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, Segoe UI, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.4;
+}
+header, main { padding: 0.85rem 1rem; }
+header { border-bottom: 1px solid var(--border); }
+h1 { margin: 0; font-size: 1.2rem; }
+h2 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--muted); }
+.sub, .hint { color: var(--muted); font-size: 0.85rem; margin: 0.25rem 0 0; }
+.block {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem;
+  margin: 0.75rem 0;
+}
+label { display: block; margin: 0.5rem 0; font-size: 0.9rem; }
+input, select {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #0f1419;
+  color: var(--text);
+}
+label.check { display: flex; align-items: center; gap: 0.5rem; }
+label.check input { width: auto; margin: 0; }
+button {
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.primary { background: var(--accent); color: #fff; width: 100%; }
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  margin: 0.25rem 0.25rem 0 0;
+}
+.suggest {
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-top: 0.35rem;
+  display: none;
+}
+.suggest.open { display: block; }
+.suggest button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  font-weight: 400;
+}
+.fav-list { list-style: none; padding: 0; margin: 0; }
+.fav-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+#map {
+  height: 320px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.station-popup {
+  margin-top: 0.5rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.hidden { display: none; }
+.station-marker { text-align: center; }
+.marker-pin-head {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid #111; overflow: hidden;
+  background: var(--pin-heat, #22c55e);
+  margin: 0 auto;
+}
+.marker-pin-head img { width: 20px; height: 20px; object-fit: contain; }
+.station-div-icon { background: transparent !important; border: none !important; }
