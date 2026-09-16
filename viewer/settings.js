@@ -197,22 +197,20 @@
   }
 
   async function loadSuburbs() {
-    try {
-      const r = await fetch(`${dataBase}/v1/au-suburbs.json`);
-      if (r.ok) {
+    const sources = [
+      `${dataBase}/v1/au-suburbs.json`,
+      'au-suburbs.json',
+      'https://raw.githubusercontent.com/erad84/aus-fuel-watch/data/v1/au-suburbs.json',
+    ];
+    for (const url of sources) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) continue;
         const data = await r.json();
         suburbIndex = ingestSuburbs(data);
         if (suburbIndex.length) return;
-      }
-    } catch (_) {}
-    try {
-      const r = await fetch('au-suburbs.json');
-      if (r.ok) {
-        const data = await r.json();
-        suburbIndex = ingestSuburbs(data);
-        if (suburbIndex.length) return;
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
     if (window.AFW_SUBURBS) {
       suburbIndex = ingestSuburbs(window.AFW_SUBURBS);
       if (suburbIndex.length) return;
