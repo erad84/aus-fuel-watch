@@ -401,6 +401,10 @@ button:hover { filter: brightness(1.08); }
   stroke: var(--border);
   stroke-width: 1.5;
 }
+.cycle-dial .outlook-glow,
+.cycle-dial .outlook-glow-soft {
+  pointer-events: none;
+}
 .cycle-meta {
   text-align: center;
   font-size: 0.8rem;
@@ -933,6 +937,15 @@ button:hover { filter: brightness(1.08); }
   line-height: 1.25;
   min-height: 1.25em;
 }
+.outlook-bar .outlook-countdown.falling {
+  color: var(--falling);
+}
+.outlook-bar .outlook-countdown.rising {
+  color: var(--rising);
+}
+.outlook-bar .outlook-countdown.flat {
+  color: var(--muted);
+}
 .outlook-bar .outlook-asof {
   margin: 0.15rem 0 0;
   font-size: 0.72rem;
@@ -952,13 +965,18 @@ button:hover { filter: brightness(1.08); }
   min-height: 1.3em;
 }
 .outlook-bar .bar-labels .falling {
-  color: var(--bottom);
+  color: var(--falling);
 }
 .outlook-bar .bar-labels .rising {
-  color: var(--peak);
+  color: var(--rising);
 }
 .outlook-bar .area-rank-track {
-  background: linear-gradient(90deg, var(--bottom) 0%, #eab308 50%, var(--peak) 100%);
+  background: linear-gradient(
+    90deg,
+    var(--rising) 0%,
+    color-mix(in srgb, var(--rising) 35%, var(--falling)) 50%,
+    var(--falling) 100%
+  );
 }
 .outlook-bar .outlook-hint {
   margin: 0.35rem 0 0;

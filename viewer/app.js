@@ -171,7 +171,8 @@ let calibratedLagMeta = {};
 
 /** Cron-published lag calib from docs/v1/lag-calib.json (Pages). */
 let publishedLagCalib = /** @type {{
-  byState?: Record<string, object>,
+  v?: number,
+  byState?: Record<string, Record<string, Record<string, object>>>,
   lagDays?: { default?: number, min?: number, max?: number, byState?: Record<string, number> },
   updated?: string,
   windowDays?: number
@@ -210,7 +211,7 @@ const LEAD_SPIKE_TIP_FLAT = 1.2;
  */
 const OUTLOOK_DIR_SMOOTH_DAYS = 3;
 /** Falling↔Rising bar maps AIP week Δ onto ± this many c/L at the extremes. */
-const OUTLOOK_BAR_SCALE_CPL = 8;
+const OUTLOOK_BAR_SCALE_CPL = 10;
 /** @type {{ state: string, publishedId: string, byDate: Map<string, number>, daysLoaded: number } | null} */
 let selectedPublishedHistory = null;
 /** @type {{ mean: (number|null)[], low: (number|null)[], high: (number|null)[], peerCount: number, radiusKm: number } | null} */
@@ -722,11 +723,10 @@ async function loadArchivesForState(state) {
 function buildMergedSeries(file, archiveByFuel, fuel, scope) {
   const dayMap = {};
   const sc = scope || file.defaultScope || file.granularity || 'metro';
-  // Archives are a single legacy series - only overlay on the default/primary scope.
-  const primary = file.defaultScope || file.granularity || 'metro';
-  if (sc === primary || !file.scopes) {
-    mergeArchiveIntoSeries(archiveByFuel, fuel, dayMap);
-  }
+  // Monthly archives are a single series (often the import/primary granularity —
+  // e.g. FuelCheck NSW is statewide). Always fill date gaps so 120/180d metro
+  // charts can extend past the live window; live scope rows still win on overlap.
+  mergeArchiveIntoSeries(archiveByFuel, fuel, dayMap);
   for (const p of expandFileSeries(file, fuel, sc)) dayMap[p.date] = p;
   return Object.values(dayMap).sort((a, b) => (a.date < b.date ? -1 : 1));
 }
@@ -734,7 +734,10 @@ function buildMergedSeries(file, archiveByFuel, fuel, scope) {
 function sliceSeriesByPeriod(points, days) {
   if (!points.length) return [];
   const n = Number(days) || 90;
-  return points.slice(Math.max(0, points.length - n));
+  const last = points[points.length - 1]?.date;
+  if (!last) return points.slice(Math.max(0, points.length - n));
+  const cutoff = dayNumToISO(isoToDayNum(last) - (n - 1));
+  return points.filter((p) => p.date >= cutoff);
 }
 
 function seriesStats(points) {
@@ -1231,6 +1234,76 @@ function arcPath(cx, cy, r, startDeg, endDeg) {
   return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
 }
 
+/** Annular wedge: outer arc start→end, back along inner arc. Angles clockwise from top. */
+function annularSectorPath(cx, cy, rInner, rOuter, startDeg, endDeg) {
+  const sweep = (endDeg - startDeg + 360) % 360;
+  const large = sweep > 180 ? 1 : 0;
+  const o0 = polarXY(cx, cy, rOuter, startDeg);
+  const o1 = polarXY(cx, cy, rOuter, endDeg);
+  const i1 = polarXY(cx, cy, rInner, endDeg);
+  const i0 = polarXY(cx, cy, rInner, startDeg);
+  return (
+    `M ${o0.x.toFixed(2)} ${o0.y.toFixed(2)} ` +
+    `A ${rOuter} ${rOuter} 0 ${large} 1 ${o1.x.toFixed(2)} ${o1.y.toFixed(2)} ` +
+    `L ${i1.x.toFixed(2)} ${i1.y.toFixed(2)} ` +
+    `A ${rInner} ${rInner} 0 ${large} 0 ${i0.x.toFixed(2)} ${i0.y.toFixed(2)} Z`
+  );
+}
+
+/**
+ * AIP last-move glow for the main cycle dial: strength 0..1 fills from the
+ * coloured ring inward toward the hub on the falling or rising side.
+ */
+function currentOutlookGlow(asOfIso = null) {
+  const fuel = document.getElementById('fuelSelect')?.value || 'U91';
+  if (fuel === 'LPG') return null;
+  const state = document.getElementById('stateSelect')?.value || '';
+  const signal = outlookAipLastMoveSignal(fuel, state, {
+    asOfIso: asOfIso || outlookChartAsOfIso(),
+  });
+  if (!signal || signal.direction === 'flat') return null;
+  const strength = Number(signal.strength);
+  if (!Number.isFinite(strength) || strength < 0.04) return null;
+  return { direction: signal.direction, strength: Math.min(1, strength) };
+}
+
+function outlookGlowSvg(cx, cy, ringR, hubR, glow, uid) {
+  if (!glow) return '';
+  const strokeHalf = 7; // arc stroke-width 14 / 2
+  const rOuter = ringR - strokeHalf - 0.5;
+  const gap = Math.max(0, rOuter - hubR);
+  const rInner = rOuter - glow.strength * gap;
+  if (rInner >= rOuter - 0.5) return '';
+
+  const falling = glow.direction === 'falling';
+  const rising = glow.direction === 'rising';
+  if (!falling && !rising) return '';
+
+  const startDeg = falling ? 45 : 225;
+  const endDeg = falling ? 135 : 315;
+  const color = falling ? '#3b82f6' : '#eab308';
+  const gradId = `outlook-glow-${uid}`;
+  const softId = `outlook-glow-soft-${uid}`;
+  const t0 = Math.max(0, Math.min(1, rInner / rOuter));
+  const path = annularSectorPath(cx, cy, rInner, rOuter, startDeg, endDeg);
+  // Soft outer blush + stronger wedge (radial fade toward hub).
+  return `
+    <defs>
+      <radialGradient id="${gradId}" gradientUnits="userSpaceOnUse" cx="${cx}" cy="${cy}" r="${rOuter}">
+        <stop offset="0" stop-color="${color}" stop-opacity="0" />
+        <stop offset="${t0.toFixed(3)}" stop-color="${color}" stop-opacity="0" />
+        <stop offset="0.82" stop-color="${color}" stop-opacity="0.22" />
+        <stop offset="1" stop-color="${color}" stop-opacity="0.48" />
+      </radialGradient>
+      <filter id="${softId}" x="-25%" y="-25%" width="150%" height="150%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" />
+      </filter>
+    </defs>
+    <path class="outlook-glow-soft" d="${path}" fill="url(#${gradId})" filter="url(#${softId})" opacity="0.9" />
+    <path class="outlook-glow" d="${path}" fill="url(#${gradId})" />
+  `;
+}
+
 function renderCycleDial(stage, opts = {}) {
   const el = document.getElementById(opts.targetId || 'cycleStages');
   if (!el) return;
@@ -1244,6 +1317,7 @@ function renderCycleDial(stage, opts = {}) {
   const cx = 100;
   const cy = 100;
   const r = 62;
+  const hubR = 14;
 
   // Peak arc wraps past 0 deg - draw as two segments.
   const arcSvg = [
@@ -1255,9 +1329,9 @@ function renderCycleDial(stage, opts = {}) {
   ].join('');
 
   const peak = polarXY(cx, cy, r + 22, 0);
-  const falling = polarXY(cx, cy, r + 28, 90);
+  const falling = polarXY(cx, cy, r + 26, 90);
   const bottom = polarXY(cx, cy, r + 22, 180);
-  const rising = polarXY(cx, cy, r + 28, 270);
+  const rising = polarXY(cx, cy, r + 26, 270);
 
   let marker = '';
   if (stage.placed && stage.angle != null) {
@@ -1279,17 +1353,31 @@ function renderCycleDial(stage, opts = {}) {
   };
   const title = opts.title || 'Price cycle position';
   const wrapClass = opts.dialClass ? `cycle-dial-wrap ${opts.dialClass}` : 'cycle-dial-wrap';
+  // Glow on every dial unless explicitly disabled (opts.outlookGlow === null).
+  const glow =
+    opts.outlookGlow === null
+      ? null
+      : opts.outlookGlow !== undefined
+        ? opts.outlookGlow
+        : currentOutlookGlow(asOf || null);
+  const glowUid = String(opts.targetId || 'cycleStages').replace(/[^\w-]+/g, '');
+  const glowSvg = outlookGlowSvg(cx, cy, r, hubR, glow, glowUid);
+  const fx = falling.x.toFixed(1);
+  const fy = falling.y.toFixed(1);
+  const rx = rising.x.toFixed(1);
+  const ry = rising.y.toFixed(1);
 
   el.innerHTML = `
     <div class="${wrapClass}" title="${escapeHtml(title)}">
       <svg class="cycle-dial" viewBox="-8 -4 216 208" role="img" aria-label="Cycle: ${escapeHtml(stage.label)}">
         <circle class="ring-track" cx="${cx}" cy="${cy}" r="${r}" />
+        ${glowSvg}
         ${arcSvg}
-        <circle class="hub" cx="${cx}" cy="${cy}" r="28" />
+        <circle class="hub" cx="${cx}" cy="${cy}" r="${hubR}" />
         <text class="cycle-label label-peak" x="${peak.x.toFixed(1)}" y="${peak.y.toFixed(1)}" dy="0.35em">${L.peak}</text>
-        <text class="cycle-label label-falling" x="${falling.x.toFixed(1)}" y="${falling.y.toFixed(1)}" dy="0.35em">${L.falling}</text>
+        <text class="cycle-label label-falling" x="${fx}" y="${fy}" dy="0.35em" transform="rotate(90 ${fx} ${fy})">${L.falling}</text>
         <text class="cycle-label label-bottom" x="${bottom.x.toFixed(1)}" y="${bottom.y.toFixed(1)}" dy="0.35em">${L.bottom}</text>
-        <text class="cycle-label label-rising" x="${rising.x.toFixed(1)}" y="${rising.y.toFixed(1)}" dy="0.35em">${L.rising}</text>
+        <text class="cycle-label label-rising" x="${rx}" y="${ry}" dy="0.35em" transform="rotate(-90 ${rx} ${ry})">${L.rising}</text>
         ${marker}
       </svg>
     </div>
@@ -2661,7 +2749,6 @@ async function loadLagCalibData() {
     const remote = await fetchJson(`${baseUrl()}/v1/lag-calib.json`);
     if (remote?.byState && typeof remote.byState === 'object') {
       publishedLagCalib = remote;
-      applyPublishedLagCalib();
       return publishedLagCalib;
     }
   } catch (e) {
@@ -2671,33 +2758,67 @@ async function loadLagCalibData() {
   return null;
 }
 
-/** Seed runtime lag maps from cron-published calib (trusted / non-soft only for byState). */
-function applyPublishedLagCalib() {
-  const by = publishedLagCalib?.byState;
-  if (!by) return;
-  for (const [st, row] of Object.entries(by)) {
-    if (!row || !Number.isFinite(Number(row.lag))) continue;
-    const lag = Math.round(Number(row.lag));
-    const soft = !!row.soft;
-    calibratedLagMeta[st] = {
-      corr: Number(row.corr) || 0,
-      n: Number(row.n) || 0,
-      lag,
-      soft,
-      source: soft ? 'soft' : row.source || 'published',
-      turns: row.turns || null,
-      published: true,
-      scope: row.scope || null,
-      windowDays: publishedLagCalib.windowDays || null,
-    };
-    if (!soft) calibratedLagByState[st] = lag;
-  }
+function calibKey(state, scope, fuel) {
+  return `${String(state || '').toUpperCase()}|${scope || 'metro'}|${fuel || 'U91'}`;
 }
 
-function hasPublishedLag(state) {
+/** Nested v2 cell, or legacy flat byState[st] row. */
+function lookupPublishedCalibRow(state, scope, fuel) {
   const st = String(state || '').toUpperCase();
-  const row = publishedLagCalib?.byState?.[st];
-  return !!(row && Number.isFinite(Number(row.lag)) && !row.soft);
+  const sc = scope || 'metro';
+  const f = fuel || 'U91';
+  const nested = publishedLagCalib?.byState?.[st]?.[sc]?.[f];
+  if (nested && Number.isFinite(Number(nested.lag))) return nested;
+  // Legacy v1: one row per state (usually metro/U91).
+  const legacy = publishedLagCalib?.byState?.[st];
+  if (
+    legacy &&
+    Number.isFinite(Number(legacy.lag)) &&
+    !legacy.metro &&
+    !legacy.state &&
+    !legacy.regional
+  ) {
+    if (f === (legacy.fuel || 'U91') && (!legacy.scope || legacy.scope === sc)) {
+      return legacy;
+    }
+    // Accept legacy as U91/metro fallback only.
+    if (f === 'U91' && sc === 'metro') return legacy;
+  }
+  return null;
+}
+
+/**
+ * Prefer cron-published cell for this state/scope/fuel.
+ * Soft rows are still used (clients should not recompute when cron published).
+ */
+function applyPublishedCalibCell(state, scope, fuel) {
+  const row = lookupPublishedCalibRow(state, scope, fuel);
+  if (!row) return null;
+  const st = String(state || '').toUpperCase();
+  const sc = scope || selectedScope() || 'metro';
+  const f = fuel || 'U91';
+  const key = calibKey(st, sc, f);
+  const lag = Math.round(Number(row.lag));
+  const soft = !!row.soft;
+  calibratedLagMeta[key] = {
+    corr: Number(row.corr) || 0,
+    n: Number(row.n) || 0,
+    lag,
+    soft,
+    source: soft ? 'soft' : row.source || 'published',
+    turns: row.turns || null,
+    published: true,
+    scope: sc,
+    fuel: f,
+    leadKey: row.leadKey || null,
+    windowDays: publishedLagCalib?.windowDays || null,
+  };
+  calibratedLagByState[key] = lag;
+  return lag;
+}
+
+function hasPublishedLag(state, scope, fuel) {
+  return !!lookupPublishedCalibRow(state, scope, fuel);
 }
 
 function outlookWeeksForFuel(fuel) {
@@ -2769,13 +2890,17 @@ function lagConfig() {
   );
 }
 
-function outlookLagDays(state) {
+function outlookLagDays(state, fuel, scope) {
   const d = lagConfig();
   const st = (state || document.getElementById('stateSelect')?.value || '').toUpperCase();
-  // Strong / merged / turn-assisted / published calibrations override configured defaults.
-  if (st && calibratedLagByState[st] != null && !calibratedLagMeta[st]?.soft) {
-    return calibratedLagByState[st];
+  const f = fuel || document.getElementById('fuelSelect')?.value || 'U91';
+  const sc = scope || selectedScope() || 'metro';
+  const key = calibKey(st, sc, f);
+  if (st && calibratedLagByState[key] != null) {
+    return calibratedLagByState[key];
   }
+  const published = applyPublishedCalibCell(st, sc, f);
+  if (published != null) return published;
   const by = d?.byState?.[st];
   if (Number.isFinite(Number(by)) && Number(by) > 0) return Math.round(Number(by));
   const def = Number(d?.default);
@@ -2783,28 +2908,34 @@ function outlookLagDays(state) {
   return 10;
 }
 
-function lagNoteForState(st, lag) {
-  const meta = calibratedLagMeta[st];
+function lagNoteForState(st, lag, fuel, scope) {
+  const f = fuel || document.getElementById('fuelSelect')?.value || 'U91';
+  const sc = scope || selectedScope() || 'metro';
+  const key = calibKey(st, sc, f);
+  const meta = calibratedLagMeta[key];
   if (!meta) return `${lag}d (${st || 'default'})`;
   const rn = `r=${meta.corr} n=${meta.n}`;
+  const where = `${st}/${sc}/${f}`;
   const pub = meta.published ? ' · cron' : '';
   if (meta.soft) {
-    return `${lag}d (${st} · soft ~${meta.lag}d ${rn}${pub})`;
+    return `${lag}d (${where} · soft ${rn}${pub})`;
   }
   if (meta.source === 'merged') {
-    return `${lag}d (${st} calib+turns ${rn}${pub})`;
+    return `${lag}d (${where} calib+turns ${rn}${pub})`;
   }
   if (meta.source === 'turns') {
-    return `${lag}d (${st} turn-assist ${rn}${pub})`;
+    return `${lag}d (${where} turn-assist ${rn}${pub})`;
   }
   if (meta.published || meta.source === 'published') {
-    return `${lag}d (${st} calib ${rn} · cron)`;
+    return `${lag}d (${where} calib ${rn} · cron)`;
   }
-  return `${lag}d (${st} calib ${rn})`;
+  return `${lag}d (${where} calib ${rn})`;
 }
 
-function turnsLagNote(st) {
-  const t = calibratedLagMeta[st]?.turns;
+function turnsLagNote(st, fuel, scope) {
+  const f = fuel || document.getElementById('fuelSelect')?.value || 'U91';
+  const sc = scope || selectedScope() || 'metro';
+  const t = calibratedLagMeta[calibKey(st, sc, f)]?.turns;
   if (!t) return null;
   return `Turn assist · ~${t.lag}d behind · r=${t.corr} · n=${t.n}`;
 }
@@ -3145,7 +3276,8 @@ function assessWeeklyOutlookEventMove(fuel, { direction, turnIso, asOfIso } = {}
  */
 function predictMoveBand80(fuel, state, opts = {}) {
   const st = String(state || '').toUpperCase();
-  const mb = calibratedLagMeta[st]?.moveBand;
+  const sc = opts.scope || selectedScope() || 'metro';
+  const mb = calibratedLagMeta[calibKey(st, sc, fuel)]?.moveBand;
   if (!mb) return null;
   const event =
     opts.cadence === 'weekly'
@@ -3506,25 +3638,25 @@ function calibrateTurnLag(pairs, minL, maxL) {
 }
 
 /**
- * Calibrate Singapore→AU lag: business-day multi-window daily fit, assisted by
- * turn-based lag when it agrees or when daily is soft.
+ * Prefer cron-published calib for state/scope/fuel. Local fit only when missing.
  */
 function calibrateStateLag(state, fuel, stateSeries) {
   const st = String(state || '').toUpperCase();
-  // Prefer cron-published calib when available (non-soft).
-  if (hasPublishedLag(st)) {
-    applyPublishedLagCalib();
-    return calibratedLagByState[st] ?? null;
-  }
+  const f = fuel || document.getElementById('fuelSelect')?.value || 'U91';
+  const sc = selectedScope() || 'metro';
+  const key = calibKey(st, sc, f);
 
-  const days = leadDaysForFuel(fuel);
+  const published = applyPublishedCalibCell(st, sc, f);
+  if (published != null) return published;
+
+  const days = leadDaysForFuel(f);
   if (!state || !days.length || !stateSeries?.length) return null;
   const cfg = lagConfig();
   const minL = Math.max(1, Math.round(Number(cfg.min) || 5));
   const maxL = Math.max(minL, Math.round(Number(cfg.max) || 21));
 
-  delete calibratedLagByState[st];
-  delete calibratedLagMeta[st];
+  delete calibratedLagByState[key];
+  delete calibratedLagMeta[key];
 
   const leadByDate = new Map(days.map((d) => [d.date, d.value]));
   const pairs = [];
@@ -3610,7 +3742,7 @@ function calibrateStateLag(state, fuel, stateSeries) {
   const bandSmooth = dailyBest?.smooth ?? 7;
   const bandRetDays = dailyBest?.retDays ?? 7;
   const moveBand = fitMoveBandModel(pairs, lag, bandSmooth, bandRetDays);
-  calibratedLagMeta[st] = {
+  calibratedLagMeta[key] = {
     corr: corrRound,
     n,
     lag,
@@ -3618,14 +3750,17 @@ function calibrateStateLag(state, fuel, stateSeries) {
     source,
     turns: turnBest,
     moveBand,
+    published: false,
+    scope: sc,
+    fuel: f,
   };
-  if (!soft) calibratedLagByState[st] = lag;
+  calibratedLagByState[key] = lag;
   return soft ? null : lag;
 }
 
 /**
  * Simple Outlook signal: last AIP weekly Mogas/Gasoil week-to-week move.
- * Bar maps Δ onto ±OUTLOOK_BAR_SCALE_CPL at the Falling/Rising extremes.
+ * Bar maps Δ onto ±OUTLOOK_BAR_SCALE_CPL (Rising left / Falling right).
  * Pass asOfIso to replay as of a chart hover day.
  */
 function outlookAipLastMoveSignal(fuel, state, { asOfIso = null } = {}) {
@@ -3648,23 +3783,27 @@ function outlookAipLastMoveSignal(fuel, state, { asOfIso = null } = {}) {
   const direction =
     delta > 0.05 ? 'rising' : delta < -0.05 ? 'falling' : 'flat';
   const scale = OUTLOOK_BAR_SCALE_CPL;
-  let pct = 50 + (delta / scale) * 50;
+  // Rising ← left, Falling → right (swapped vs dial left/right but matches bar labels).
+  let pct = 50 - (delta / scale) * 50;
   pct = Math.max(0, Math.min(100, pct));
+  const strength = Math.min(1, Math.abs(delta) / scale);
 
   const st = (state || document.getElementById('stateSelect')?.value || '').toUpperCase();
-  const lag = outlookLagDays(st);
-  const scope = selectedScope() || '';
+  const scope = selectedScope() || 'metro';
+  const lag = outlookLagDays(st, fuel, scope);
   return {
     pct,
     direction,
+    strength,
     delta: Math.round(delta * 10) / 10,
     moveDate: to.weekEnding,
     fromValue: from.value,
     toValue: to.value,
     lag,
-    lagNote: lagNoteForState(st, lag),
+    lagNote: lagNoteForState(st, lag, fuel, scope),
     state: st || null,
     scope: scope || null,
+    fuel: fuel || null,
     asOfIso: asOfIso || null,
     commodity: outlookCommodityLabel(fuel),
   };
@@ -3681,10 +3820,8 @@ function formatOutlookMoveHeadline(signal) {
 }
 
 function formatOutlookLagLine(signal) {
-  if (!signal) return null;
-  const st = signal.state || 'AU';
-  const scope = signal.scope ? ` ${signal.scope}` : '';
-  return `${st}${scope} typically lags AIP Mogas by ~${signal.lagNote}`;
+  if (!signal?.lagNote) return null;
+  return signal.lagNote;
 }
 
 function renderOutlookBarHtml(signal) {
@@ -3694,7 +3831,13 @@ function renderOutlookBarHtml(signal) {
   const pct = signal.pct;
   const headline = formatOutlookMoveHeadline(signal);
   const lagText = formatOutlookLagLine(signal);
-  const moveLine = `<p class="outlook-countdown">${headline ? escapeHtml(headline) : '&nbsp;'}</p>`;
+  const dirClass =
+    signal.direction === 'rising' || signal.direction === 'falling'
+      ? signal.direction
+      : 'flat';
+  const moveLine = `<p class="outlook-countdown ${dirClass}">${
+    headline ? escapeHtml(headline) : '&nbsp;'
+  }</p>`;
   const lagLine = `<p class="outlook-expected">${lagText ? escapeHtml(lagText) : '&nbsp;'}</p>`;
   const asOfLine = `<p class="outlook-asof">${
     signal.asOfIso ? escapeHtml(`as of ${signal.asOfIso}`) : '&nbsp;'
@@ -3705,7 +3848,7 @@ function renderOutlookBarHtml(signal) {
       ${asOfLine}
       ${moveLine}
       ${lagLine}
-      <div class="bar-labels"><span class="falling">Falling</span><span class="rising">Rising</span></div>
+      <div class="bar-labels"><span class="rising">Rising</span><span class="falling">Falling</span></div>
       <div class="area-rank-track">
         <div class="area-rank-marker" style="left:${pct.toFixed(1)}%"></div>
       </div>
@@ -4721,6 +4864,14 @@ async function refreshCharts() {
     `. Last ${periodDays} days. Means solid · lows dotted · highs dashed. ` +
     `Turn lines: highs dashed (darker), lows dotted (lighter) · blue scope / purple suburb / orange favourites. ` +
     `FFT assist: dashed curves match each mean (state / suburb / favs).`;
+  if (series.length && file.start && series[0].date < file.start) {
+    hint +=
+      ` Pre-${file.start} days filled from monthly archives` +
+      (file.defaultScope && file.defaultScope !== scope
+        ? ` (${file.defaultScope} grain)`
+        : '') +
+      '.';
+  }
   if (turnTune) {
     hint +=
       ` (sens ${turnTune.sensitivity}, gap ${turnParams?.minGap ?? turnTune.minGapDays}d, coarse ${turnTune.coarseness}, FFT ${turnTune.fftAssist ?? 0}).`;

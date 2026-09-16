@@ -1,9 +1,11 @@
 'use strict';
 
 /**
- * Calibrate Singapore lead → AU retail lag per state using ~180d of published
- * history (live window + monthly archives). Writes docs/v1/lag-calib.json and
- * merges trusted lags into lead.json lagDays.byState.
+ * Calibrate Singapore lead → AU retail lag for every state × scope × fuel
+ * with enough live history. Writes docs/v1/lag-calib.json and merges trusted
+ * preferred lags into lead.json lagDays.byState (metro/U91 when available).
+ *
+ * Archives are not mixed in (unscoped grain). Live scoped series only.
  *
  * Usage:
  *   node data/seed/calibrate-lag.js
@@ -14,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { STATES } = require('../lib/states');
+const { FUELS } = require('../lib/fuels');
 const { isoToDayNum, dayNumToISO } = require('../lib/cyclefit');
 const lagCalib = require('../lib/lagCalib');
 
@@ -26,6 +29,10 @@ const EMBED_PATH =
 const DRY = process.argv.includes('--dry-run');
 const SKIP_EMBED = process.argv.includes('--no-embed');
 
+const SCOPES = ['metro', 'state', 'regional'];
+/** Fuels with a Singapore lead series (LPG has none). */
+const CALIB_FUELS = FUELS.filter((f) => f !== 'LPG');
+
 function argNum(name, fallback) {
   const i = process.argv.indexOf(name);
   if (i < 0 || i + 1 >= process.argv.length) return fallback;
@@ -34,8 +41,10 @@ function argNum(name, fallback) {
 }
 
 const WINDOW_DAYS = argNum('--window', 180);
-const FUEL = 'U91';
-const LEAD_KEY = 'mogas95';
+
+function leadKeyForFuel(fuel) {
+  return fuel === 'DSL' || fuel === 'PDSL' ? 'gasoil' : 'mogas95';
+}
 
 function loadJson(p, fallback = null) {
   try {
@@ -52,7 +61,9 @@ function writeLeadEmbed(lead) {
 
 /** Expand scoped fuel series (tenths) to [{date, avg}] in c/L. */
 function expandScopeSeries(file, scope, fuel) {
-  const fuels = file.scopes?.[scope] || (scope === (file.defaultScope || file.granularity) ? file.fuels : null);
+  const fuels =
+    file.scopes?.[scope] ||
+    (scope === (file.defaultScope || file.granularity) ? file.fuels : null);
   const s = fuels?.[fuel];
   if (!file.start || !s?.avg?.length) return [];
   const start = isoToDayNum(file.start);
@@ -65,51 +76,38 @@ function expandScopeSeries(file, scope, fuel) {
   return out;
 }
 
-function pickScope(file) {
-  for (const sc of ['metro', 'state', 'regional']) {
-    if (expandScopeSeries(file, sc, FUEL).length >= 40) return sc;
-  }
-  return file.defaultScope || file.granularity || 'metro';
+function sliceWindow(series, windowDays) {
+  if (!series?.length) return [];
+  return series.slice(Math.max(0, series.length - windowDays));
 }
 
-function mergeArchiveDays(docsDir, state, fuel, dayMap) {
-  const now = new Date();
-  for (let m = 0; m < 14; m++) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - m, 1));
-    const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-    const p = path.join(docsDir, 'v1', 'archive', `${month}.json`);
-    const arch = loadJson(p);
-    const days = arch?.states?.[state]?.[fuel];
-    if (!days || typeof days !== 'object') continue;
-    for (const [iso, row] of Object.entries(days)) {
-      const avg = row?.avg;
-      if (avg == null || !Number.isFinite(Number(avg))) continue;
-      if (!dayMap.has(iso)) dayMap.set(iso, Number(avg) / 10);
+function leadByDateMap(lead, leadKey) {
+  const map = new Map();
+  for (const d of lead?.days || []) {
+    const v = d?.[leadKey];
+    if (v == null || !Number.isFinite(Number(v))) continue;
+    map.set(d.date, Number(v));
+  }
+  return map;
+}
+
+/** Prefer metro/U91, else best non-soft corr for the state. */
+function preferredLagForState(stateRows) {
+  const metroU91 = stateRows?.metro?.U91;
+  if (metroU91 && !metroU91.soft && Number.isFinite(metroU91.lag)) {
+    return Math.round(metroU91.lag);
+  }
+  let best = null;
+  for (const scope of SCOPES) {
+    const fuels = stateRows?.[scope];
+    if (!fuels) continue;
+    for (const fuel of CALIB_FUELS) {
+      const row = fuels[fuel];
+      if (!row || row.soft || !Number.isFinite(row.lag)) continue;
+      if (!best || row.corr > best.corr) best = row;
     }
   }
-}
-
-function retailSeriesForState(docsDir, state, windowDays) {
-  const file = loadJson(path.join(docsDir, 'v1', `${state}.json`));
-  if (!file) return { series: [], scope: null };
-  const scope = pickScope(file);
-  const dayMap = new Map();
-  mergeArchiveDays(docsDir, state, FUEL, dayMap);
-  for (const p of expandScopeSeries(file, scope, FUEL)) {
-    dayMap.set(p.date, p.avg);
-  }
-  const all = [...dayMap.entries()]
-    .map(([date, avg]) => ({ date, avg }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-  const sliced = all.slice(Math.max(0, all.length - windowDays));
-  return { series: sliced, scope };
-}
-
-function leadDaysFromFile(lead) {
-  return (lead?.days || [])
-    .filter((d) => d?.[LEAD_KEY] != null && Number.isFinite(Number(d[LEAD_KEY])))
-    .map((d) => ({ date: d.date, value: Number(d[LEAD_KEY]) }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  return best ? Math.round(best.lag) : null;
 }
 
 function main() {
@@ -118,55 +116,82 @@ function main() {
     console.error('No lead.json days at', LEAD_PATH);
     process.exit(1);
   }
-  const leadDays = leadDaysFromFile(lead);
-  const leadByDate = new Map(leadDays.map((d) => [d.date, d.value]));
+
   const cfg = {
     min: lead.lagDays?.min ?? lagCalib.DEFAULT_LAG.min,
     max: lead.lagDays?.max ?? lagCalib.DEFAULT_LAG.max,
   };
 
+  const leadMaps = {
+    mogas95: leadByDateMap(lead, 'mogas95'),
+    gasoil: leadByDateMap(lead, 'gasoil'),
+  };
+
   const byState = {};
+  let hitCount = 0;
+  let missCount = 0;
+
+  for (const state of STATES) {
+    const file = loadJson(path.join(DOCS, 'v1', `${state}.json`));
+    if (!file) {
+      console.log(`${state}: missing file`);
+      continue;
+    }
+    byState[state] = {};
+
+    for (const scope of SCOPES) {
+      for (const fuel of CALIB_FUELS) {
+        const leadKey = leadKeyForFuel(fuel);
+        const series = sliceWindow(expandScopeSeries(file, scope, fuel), WINDOW_DAYS);
+        const leadByDate = leadMaps[leadKey];
+        const pairs = [];
+        for (const p of series) {
+          const lv = leadByDate.get(p.date);
+          if (lv == null) continue;
+          pairs.push({ date: p.date, lead: lv, avg: p.avg });
+        }
+        const hit = lagCalib.calibrateFromPairs(pairs, cfg);
+        if (!hit) {
+          missCount++;
+          continue;
+        }
+        hitCount++;
+        if (!byState[state][scope]) byState[state][scope] = {};
+        byState[state][scope][fuel] = {
+          lag: hit.lag,
+          corr: hit.corr,
+          n: hit.n,
+          soft: hit.soft,
+          source: hit.source,
+          leadKey,
+          turns: hit.turns,
+          pairs: pairs.length,
+          days: series.length,
+        };
+        console.log(
+          `${state}/${scope}/${fuel}: lag=${hit.lag}d r=${hit.corr} n=${hit.n} ` +
+            `${hit.source}${hit.soft ? ' soft' : ''} lead=${leadKey} pairs=${pairs.length}`
+        );
+      }
+    }
+  }
+
   const lagByState = {
     ...(lagCalib.DEFAULT_LAG.byState || {}),
     ...(lead.lagDays?.byState || {}),
   };
-
   for (const state of STATES) {
-    const { series, scope } = retailSeriesForState(DOCS, state, WINDOW_DAYS);
-    const pairs = [];
-    for (const p of series) {
-      const lv = leadByDate.get(p.date);
-      if (lv == null) continue;
-      pairs.push({ date: p.date, lead: lv, avg: p.avg });
-    }
-    const hit = lagCalib.calibrateFromPairs(pairs, cfg);
-    if (!hit) {
-      console.log(`${state}: no calib (pairs=${pairs.length} scope=${scope})`);
-      continue;
-    }
-    byState[state] = {
-      lag: hit.lag,
-      corr: hit.corr,
-      n: hit.n,
-      soft: hit.soft,
-      source: hit.source,
-      scope,
-      fuel: FUEL,
-      leadKey: LEAD_KEY,
-      turns: hit.turns,
-    };
-    if (!hit.soft) lagByState[state] = hit.lag;
-    console.log(
-      `${state}: lag=${hit.lag}d r=${hit.corr} n=${hit.n} ${hit.source}${hit.soft ? ' soft' : ''} scope=${scope} pairs=${pairs.length}`
-    );
+    const pref = preferredLagForState(byState[state]);
+    if (pref != null) lagByState[state] = pref;
   }
 
   const payload = {
-    source: 'lead.json vs published state means (metro preferred)',
+    v: 2,
+    source: 'lead.json vs live scoped state means (all state×scope×fuel)',
     updated: new Date().toISOString().slice(0, 10),
     windowDays: WINDOW_DAYS,
-    fuel: FUEL,
-    leadKey: LEAD_KEY,
+    scopes: SCOPES,
+    fuels: CALIB_FUELS,
     lagDays: {
       default: lead.lagDays?.default ?? lagCalib.DEFAULT_LAG.default,
       min: cfg.min,
@@ -175,16 +200,18 @@ function main() {
     },
     byState,
     generated: new Date().toISOString(),
+    stats: { hitCount, missCount },
   };
 
   if (DRY) {
-    console.log(JSON.stringify(payload, null, 2));
+    console.log(JSON.stringify({ stats: payload.stats, lagDays: payload.lagDays }, null, 2));
+    console.log(`Wrote dry-run summary (${hitCount} hits, ${missCount} misses)`);
     return;
   }
 
   fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
   fs.writeFileSync(OUT_PATH, JSON.stringify(payload, null, 2) + '\n');
-  console.log('Wrote', OUT_PATH);
+  console.log(`Wrote ${OUT_PATH} (${hitCount} hits, ${missCount} misses)`);
 
   lead.lagDays = {
     default: payload.lagDays.default,
