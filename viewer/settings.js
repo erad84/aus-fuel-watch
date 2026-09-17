@@ -370,13 +370,91 @@
     if (map && row.lat != null) {
       const el = document.getElementById('map');
       if (el && el.scrollIntoView) {
-        el.scrollIntoView({ block: 'nearest', behavior: 'instant' in window ? 'instant' : 'auto' });
+        el.scrollIntoView({ block: 'nearest', behavior: 'auto' });
       }
       centerMapOnPrefs(target, { zoom: 14 });
       loadStationsInView();
     } else {
       updateSuburbCircle();
     }
+    /* Postcode datasets often share one point for every locality in a PC
+     * (e.g. all of 2750 → Emu Plains). Refine from station centroids / geocode. */
+    refineSuburbCoords(row).then((refined) => {
+      if (!refined) return;
+      UserPrefs.update({
+        areaSuburb: row.suburb,
+        areaPostcode: row.postcode,
+        areaState: row.state,
+        areaLabel: row.label,
+        areaLat: refined.lat,
+        areaLng: refined.lng,
+      });
+      if (map) {
+        centerMapOnPrefs(
+          { areaLat: refined.lat, areaLng: refined.lng, areaRadiusKm: prefs().areaRadiusKm },
+          { zoom: 14 }
+        );
+        loadStationsInView();
+      }
+    });
+  }
+
+  async function refineSuburbCoords(row) {
+    if (!row || !row.suburb) return null;
+    const st = String(row.state || prefs().homeState || 'NSW').toUpperCase();
+    const want = String(row.suburb).trim().toUpperCase();
+    const pc = row.postcode ? String(row.postcode).padStart(4, '0') : '';
+    const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameMatches = (stationName, suburb, siblings) => {
+      const name = String(stationName || '').toUpperCase();
+      const sub = String(suburb || '').toUpperCase();
+      if (!sub || !name) return false;
+      if (!new RegExp('\\b' + escapeRe(sub).replace(/\s+/g, '\\s+') + '\\b').test(name)) return false;
+      for (const sib of siblings) {
+        const s = String(sib || '').toUpperCase();
+        if (!s || s === sub || s.length <= sub.length) continue;
+        if (new RegExp('\\b' + escapeRe(s).replace(/\s+/g, '\\s+') + '\\b').test(name)) return false;
+      }
+      return true;
+    };
+    try {
+      const catalog = await fetch(`${dataBase}/v1/stations/${st}/catalog.json`).then((r) => r.json());
+      const stations = Object.values(catalog.stations || catalog);
+      const siblings = suburbIndex
+        .filter((r) => r.state === st && (!pc || r.postcode === pc))
+        .map((r) => r.suburb.toUpperCase());
+      let n = 0;
+      let lat = 0;
+      let lng = 0;
+      for (const meta of stations) {
+        if (!meta || meta.lat == null || meta.lng == null) continue;
+        const metaSub = String(meta.suburb || '').trim().toUpperCase();
+        const match =
+          metaSub === want ||
+          nameMatches(meta.name, want, siblings) ||
+          (metaSub && nameMatches(metaSub, want, siblings));
+        if (!match) continue;
+        if (pc && meta.postcode != null && String(meta.postcode).padStart(4, '0') !== pc) continue;
+        const a = Number(meta.lat);
+        const b = Number(meta.lng);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        n += 1;
+        lat += a;
+        lng += b;
+      }
+      if (n > 0) return { lat: lat / n, lng: lng / n, source: 'stations', n };
+    } catch (_) {}
+    try {
+      const q = `${row.suburb}, ${row.postcode || ''}, ${st}, Australia`;
+      const url =
+        'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=au&q=' +
+        encodeURIComponent(q);
+      const arr = await fetch(url).then((r) => r.json());
+      if (arr && arr[0] && arr[0].lat != null && arr[0].lon != null) {
+        return { lat: Number(arr[0].lat), lng: Number(arr[0].lon), source: 'nominatim' };
+      }
+    } catch (_) {}
+    return null;
   }
 
   let suburbCenterMarker = null;
@@ -502,10 +580,8 @@
       const hit = suburbIndex.find((r) => r.suburb.toLowerCase() === suburb && r.state === state);
       if (hit) return hit;
     }
-    if (postcode) {
-      const hit = suburbIndex.find((r) => r.postcode === postcode && (!state || r.state === state));
-      if (hit) return hit;
-    }
+    /* Do not fall back to "first suburb in postcode" — multi-locality PCs
+     * share bad centroids and alphabet-first is often wrong (e.g. EMU HEIGHTS). */
     return null;
   }
 
@@ -521,6 +597,30 @@
       areaLabel: hit.label,
       areaLat: hit.lat,
       areaLng: hit.lng,
+    });
+  }
+
+  async function refineSavedSuburbIfNeeded() {
+    const p = prefs();
+    if (!p.areaSuburb) return p;
+    const refined = await refineSuburbCoords({
+      suburb: p.areaSuburb,
+      postcode: p.areaPostcode,
+      state: p.areaState || p.homeState,
+      lat: p.areaLat,
+      lng: p.areaLng,
+    });
+    if (!refined) return p;
+    const old = suburbCoords(p);
+    if (
+      old &&
+      Math.hypot(old.lat - refined.lat, old.lng - refined.lng) < 0.001
+    ) {
+      return p;
+    }
+    return UserPrefs.update({
+      areaLat: refined.lat,
+      areaLng: refined.lng,
     });
   }
 
@@ -759,8 +859,13 @@
     updateCacheStatus();
     /* Create map only after suburb coords are resolved */
     initMap(p);
-    loadSuburbs().then((fixed) => {
+    loadSuburbs().then(async (fixed) => {
       if (fixed && map) centerMapOnPrefs(fixed, { zoom: 14 });
+      const refined = await refineSavedSuburbIfNeeded();
+      if (refined && map) {
+        centerMapOnPrefs(refined, { zoom: 14 });
+        loadStationsInView();
+      }
     });
 
     document.getElementById('btnDownloadLatest').onclick = () => downloadLatest();
