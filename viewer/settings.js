@@ -457,17 +457,11 @@
     return null;
   }
 
-  let suburbCenterMarker = null;
-
   function updateSuburbCircle() {
     const p = prefs();
     if (suburbCircle) {
       if (map) map.removeLayer(suburbCircle);
       suburbCircle = null;
-    }
-    if (suburbCenterMarker) {
-      if (map) map.removeLayer(suburbCenterMarker);
-      suburbCenterMarker = null;
     }
     const c = suburbCoords(p);
     if (!map || !c) return;
@@ -477,13 +471,6 @@
       color: '#3d9cf5',
       weight: 2,
       fillOpacity: 0.08,
-    }).addTo(map);
-    suburbCenterMarker = L.circleMarker([c.lat, c.lng], {
-      radius: 5,
-      color: '#fff',
-      weight: 2,
-      fillColor: '#3d9cf5',
-      fillOpacity: 1,
     }).addTo(map);
   }
 
@@ -714,7 +701,6 @@
       map = null;
       markerLayer = null;
       suburbCircle = null;
-      suburbCenterMarker = null;
     }
     map = L.map(el, { fadeAnimation: false, zoomAnimation: false }).setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
