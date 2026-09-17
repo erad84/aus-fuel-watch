@@ -276,6 +276,7 @@
   }
 
   async function loadSuburbs() {
+    seedSuburbIndex();
     const sources = [
       `${dataBase}/v1/au-suburbs.json`,
       'au-suburbs.json',
@@ -283,11 +284,17 @@
     ];
     for (const url of sources) {
       try {
-        const r = await fetch(url);
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const t = ctrl ? setTimeout(() => ctrl.abort(), 4000) : null;
+        const r = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+        if (t) clearTimeout(t);
         if (!r.ok) continue;
         const data = await r.json();
-        suburbIndex = ingestSuburbs(data);
-        if (suburbIndex.length) break;
+        const rows = ingestSuburbs(data);
+        if (rows.length) {
+          suburbIndex = rows;
+          break;
+        }
       } catch (_) {}
     }
     if (!suburbIndex.length && window.AFW_SUBURBS) {
@@ -295,14 +302,15 @@
     }
     if (!suburbIndex.length) {
       console.warn('suburbs: no index loaded');
-      return;
+      return prefs();
     }
     const fixed = ensureSuburbCoords(prefs());
     if (map) {
-      map.invalidateSize();
-      centerMapOnPrefs(fixed, { zoom: 13 });
+      map.invalidateSize({ animate: false });
+      centerMapOnPrefs(fixed, { zoom: 14 });
       loadStationsInView();
     }
+    return fixed;
   }
 
   function ingestSuburbs(data) {
@@ -362,7 +370,7 @@
     if (map && row.lat != null) {
       centerMapOnPrefs(
         { areaLat: row.lat, areaLng: row.lng },
-        { zoom: 13 }
+        { zoom: 14 }
       );
       loadStationsInView();
     }
@@ -372,12 +380,13 @@
   function updateSuburbCircle() {
     const p = prefs();
     if (suburbCircle) {
-      map.removeLayer(suburbCircle);
+      if (map) map.removeLayer(suburbCircle);
       suburbCircle = null;
     }
-    if (!map || p.areaLat == null || p.areaLng == null) return;
+    const c = suburbCoords(p);
+    if (!map || !c) return;
     const km = Number(document.getElementById('areaRadiusKm').value) || p.areaRadiusKm || 15;
-    suburbCircle = L.circle([Number(p.areaLat), Number(p.areaLng)], {
+    suburbCircle = L.circle([c.lat, c.lng], {
       radius: km * 1000,
       color: '#3d9cf5',
       weight: 2,
@@ -390,7 +399,8 @@
     const lat = Number(p.areaLat);
     const lng = Number(p.areaLng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    if (Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01) return null;
+    /* Australia bbox — reject garbage / missing coords */
+    if (lat < -45 || lat > -8 || lng < 110 || lng > 155) return null;
     return { lat, lng };
   }
 
@@ -399,17 +409,10 @@
     const src = p || prefs();
     const c = suburbCoords(src);
     if (!c) return false;
-    const km =
-      Number((opts && opts.radiusKm) || src.areaRadiusKm || document.getElementById('areaRadiusKm')?.value) ||
-      15;
-    const zoomFloor = opts && opts.zoom != null ? opts.zoom : 13;
-    try {
-      const ring = L.circle([c.lat, c.lng], { radius: Math.max(1, km) * 1000 });
-      map.fitBounds(ring.getBounds(), { padding: [28, 28], maxZoom: 15 });
-    } catch (_) {
-      map.setView([c.lat, c.lng], zoomFloor);
-    }
-    if (map.getZoom() < zoomFloor) map.setZoom(zoomFloor);
+    /* Fixed zoom only — fitBounds on the 15 km circle zooms out to ~11 and
+     * metro suburbs look the same as the Sydney default. */
+    const zoom = opts && opts.zoom != null ? opts.zoom : 14;
+    map.setView([c.lat, c.lng], Math.max(13, zoom), { animate: false });
     updateSuburbCircle();
     return true;
   }
@@ -417,8 +420,12 @@
   function findSuburbForPrefs(p) {
     if (!suburbIndex.length || !p) return null;
     const postcode = p.areaPostcode ? String(p.areaPostcode).padStart(4, '0') : '';
-    const suburb = (p.areaSuburb || '').toLowerCase();
-    const state = (p.areaState || p.homeState || '').toUpperCase();
+    const suburb = String(p.areaSuburb || '')
+      .trim()
+      .toLowerCase();
+    const state = String(p.areaState || p.homeState || '')
+      .trim()
+      .toUpperCase();
     if (postcode && suburb) {
       const hit = suburbIndex.find(
         (r) =>
@@ -432,7 +439,21 @@
       .map((s) => String(s || '').trim().toLowerCase())
       .filter(Boolean);
     for (const label of labelCandidates) {
-      const hit = suburbIndex.find((r) => r.label.toLowerCase() === label);
+      let hit = suburbIndex.find((r) => r.label.toLowerCase() === label);
+      if (hit) return hit;
+      hit = suburbIndex.find((r) => {
+        const s = r.suburb.toLowerCase();
+        return (
+          label === s ||
+          label === `${s} ${r.state.toLowerCase()}` ||
+          label === `${s} ${r.postcode}` ||
+          (label.startsWith(s + ' ') && (!state || r.state === state))
+        );
+      });
+      if (hit) return hit;
+    }
+    if (suburb && state) {
+      const hit = suburbIndex.find((r) => r.suburb.toLowerCase() === suburb && r.state === state);
       if (hit) return hit;
     }
     if (postcode) {
@@ -457,30 +478,60 @@
     });
   }
 
-  function applyAreaQueryParams(p) {
-    const next = Object.assign({}, p || prefs());
-    const latRaw = params.get('areaLat');
-    const lngRaw = params.get('areaLng');
-    const alat = latRaw != null && latRaw !== '' ? Number(latRaw) : NaN;
-    const alng = lngRaw != null && lngRaw !== '' ? Number(lngRaw) : NaN;
+  function parseAreaFromHash() {
+    const raw = String(location.hash || '').replace(/^#/, '');
+    if (!raw) return null;
+    try {
+      if (raw.charAt(0) === '{') return JSON.parse(decodeURIComponent(raw));
+    } catch (_) {}
+    const sp = new URLSearchParams(raw);
+    if (!sp.get('areaLat') && !sp.get('lat')) return null;
+    return {
+      areaLat: sp.get('areaLat') || sp.get('lat'),
+      areaLng: sp.get('areaLng') || sp.get('lng'),
+      areaLabel: sp.get('areaLabel') || sp.get('label') || '',
+      areaSuburb: sp.get('areaSuburb') || sp.get('suburb') || '',
+      areaPostcode: sp.get('areaPostcode') || sp.get('postcode') || '',
+      areaState: sp.get('areaState') || sp.get('state') || '',
+      areaRadiusKm: sp.get('areaRadiusKm') || sp.get('radius') || '',
+    };
+  }
+
+  function applyAreaFields(p, src) {
+    if (!src) return p;
+    const next = Object.assign({}, p);
+    const alat = src.areaLat != null && src.areaLat !== '' ? Number(src.areaLat) : NaN;
+    const alng = src.areaLng != null && src.areaLng !== '' ? Number(src.areaLng) : NaN;
     if (Number.isFinite(alat) && Number.isFinite(alng)) {
       next.areaLat = alat;
       next.areaLng = alng;
     }
-    const label = params.get('areaLabel');
-    if (label) next.areaLabel = label;
-    const suburb = params.get('areaSuburb');
-    if (suburb) next.areaSuburb = suburb;
-    const postcode = params.get('areaPostcode');
-    if (postcode) next.areaPostcode = postcode;
-    const state = params.get('areaState');
-    if (state) next.areaState = state;
-    const radius = params.get('areaRadiusKm');
-    if (radius != null && radius !== '') {
-      const km = Number(radius);
-      if (Number.isFinite(km) && km >= 1 && km <= 100) next.areaRadiusKm = Math.round(km);
-    }
+    if (src.areaLabel) next.areaLabel = String(src.areaLabel);
+    if (src.areaSuburb) next.areaSuburb = String(src.areaSuburb);
+    if (src.areaPostcode) next.areaPostcode = String(src.areaPostcode);
+    if (src.areaState) next.areaState = String(src.areaState);
+    const km = Number(src.areaRadiusKm);
+    if (Number.isFinite(km) && km >= 1 && km <= 100) next.areaRadiusKm = Math.round(km);
     return next;
+  }
+
+  function applyAreaQueryParams(p) {
+    let next = applyAreaFields(p || prefs(), {
+      areaLat: params.get('areaLat'),
+      areaLng: params.get('areaLng'),
+      areaLabel: params.get('areaLabel'),
+      areaSuburb: params.get('areaSuburb'),
+      areaPostcode: params.get('areaPostcode'),
+      areaState: params.get('areaState'),
+      areaRadiusKm: params.get('areaRadiusKm'),
+    });
+    next = applyAreaFields(next, parseAreaFromHash());
+    return next;
+  }
+
+  function seedSuburbIndex() {
+    if (suburbIndex.length) return;
+    if (window.AFW_SUBURBS) suburbIndex = ingestSuburbs(window.AFW_SUBURBS);
   }
 
   function initMap(initialPrefs) {
@@ -488,8 +539,16 @@
     const c = suburbCoords(p);
     const lat = c ? c.lat : -33.8688;
     const lng = c ? c.lng : 151.2093;
+    const zoom = c ? 14 : 13;
     const wantsSuburb = !!(c || p.areaLabel || p.areaSuburb || p.areaPostcode);
-    map = L.map('map', { fadeAnimation: false }).setView([lat, lng], 13);
+    const el = document.getElementById('map');
+    if (map) {
+      map.remove();
+      map = null;
+      markerLayer = null;
+      suburbCircle = null;
+    }
+    map = L.map(el, { fadeAnimation: false, zoomAnimation: false }).setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap',
       maxZoom: 18,
@@ -499,13 +558,12 @@
       clearTimeout(initMap._t);
       initMap._t = setTimeout(loadStationsInView, 400);
     });
-    updateSuburbCircle();
 
     const finishCenter = () => {
       if (!map) return false;
       map.invalidateSize({ animate: false });
       const latest = ensureSuburbCoords(prefs());
-      if (centerMapOnPrefs(latest, { zoom: 13 })) {
+      if (centerMapOnPrefs(latest, { zoom: 14 })) {
         loadStationsInView();
         return true;
       }
@@ -514,21 +572,18 @@
 
     map.whenReady(() => {
       finishCenter();
-      setTimeout(finishCenter, 150);
-      setTimeout(finishCenter, 500);
-      setTimeout(finishCenter, 1200);
+      setTimeout(finishCenter, 100);
+      setTimeout(finishCenter, 400);
     });
 
     if (!wantsSuburb && typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           if (suburbCoords(prefs()) || document.getElementById('suburbQuery')?.value?.trim()) return;
-          map.setView([pos.coords.latitude, pos.coords.longitude], 13);
+          map.setView([pos.coords.latitude, pos.coords.longitude], 14, { animate: false });
           loadStationsInView();
         },
-        () => {
-          loadStationsInView();
-        },
+        () => loadStationsInView(),
         { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 }
       );
     } else {
@@ -640,8 +695,9 @@
     }
   }
 
-  function init() {
+  async function init() {
     fillScopeCombo();
+    seedSuburbIndex();
     let p = prefs();
     try {
       const injected = params.get('prefs');
@@ -649,18 +705,22 @@
         p = UserPrefs.save(JSON.parse(injected));
       }
     } catch (_) {}
-    /* Dedicated area* params survive when the prefs JSON URL is truncated */
+    /* Query + hash area* params (hash survives better in some Pebble webviews) */
     p = UserPrefs.save(applyAreaQueryParams(p));
+    p = ensureSuburbCoords(p);
     applyPrefsToForm(p);
     updateCacheStatus();
+    /* Create map only after suburb coords are resolved */
     initMap(p);
-    loadSuburbs();
+    loadSuburbs().then((fixed) => {
+      if (fixed && map) centerMapOnPrefs(fixed, { zoom: 14 });
+    });
 
     document.getElementById('btnDownloadLatest').onclick = () => downloadLatest();
     document.getElementById('areaRadiusKm').onchange = () => {
       UserPrefs.update({ areaRadiusKm: Number(document.getElementById('areaRadiusKm').value) || 15 });
       updateSuburbCircle();
-      centerMapOnPrefs(prefs(), { zoom: 13 });
+      centerMapOnPrefs(prefs(), { zoom: 14 });
     };
     document.getElementById('suburbQuery').oninput = (ev) => {
       const box = document.getElementById('suburbSuggest');
