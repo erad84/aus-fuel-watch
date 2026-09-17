@@ -125,23 +125,66 @@
       .replace(/"/g, '&quot;');
   }
 
+  function formatAsOfLocal(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return String(iso).slice(0, 23);
+    const d = new Date(t);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = d.getDate();
+    const mon = months[d.getMonth()];
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${day} ${mon} ${hh}:${mm}`;
+  }
+
   function updateCacheStatus() {
     const el = document.getElementById('cacheStatus');
+    const p = readFormPrefs();
+    const st = p.homeState || 'NSW';
+    const stateKey = st + '.json';
+
+    /* Companion (pkjs) localStorage is separate from this webview — prefer
+     * asOf / download time passed in the settings URL from the watch. */
+    const urlAsOf = params.get('dataAsOf') || '';
+    const urlDownloaded = params.get('downloadedAt');
+    let urlDownloadedAt = urlDownloaded ? Number(urlDownloaded) : NaN;
+
+    let state = null;
+    try {
+      state = JSON.parse(localStorage.getItem(CACHE_PREFIX + stateKey) || 'null');
+    } catch (_) {}
+    const localAsOf =
+      (state && (state.generated || state.updated)) ||
+      (state && state.snapshot && state.snapshot.asOf) ||
+      '';
+    const asOfRaw = localAsOf || urlAsOf;
+    const asOfLabel = asOfRaw ? formatAsOfLocal(asOfRaw) : '';
+
     let meta = {};
     try {
       meta = JSON.parse(localStorage.getItem(CACHE_META) || '{}');
     } catch (_) {}
-    const times = Object.values(meta).filter((n) => typeof n === 'number');
-    if (!times.length) {
-      el.textContent = 'Cache: empty';
+    let downloadedAt = meta[stateKey];
+    if (typeof downloadedAt !== 'number' && Number.isFinite(urlDownloadedAt)) {
+      downloadedAt = urlDownloadedAt;
+    }
+
+    if (!asOfLabel && (downloadedAt == null || typeof downloadedAt !== 'number')) {
+      el.textContent = 'Cache: empty — tap Download latest';
       return;
     }
-    const newest = Math.max.apply(null, times);
-    const ageH = ((Date.now() - newest) / 3600000).toFixed(1);
-    const fresh = Date.now() - newest < MAX_AGE_MS;
-    el.textContent = fresh
-      ? `Cache: fresh (${ageH}h old, skip re-download under 3h)`
-      : `Cache: stale (${ageH}h old)`;
+    let line = asOfLabel ? `Data as of ${asOfLabel}` : 'Data as of —';
+    if (typeof downloadedAt === 'number') {
+      const ageH = ((Date.now() - downloadedAt) / 3600000).toFixed(1);
+      const fresh = Date.now() - downloadedAt < MAX_AGE_MS;
+      line += fresh
+        ? ` · downloaded ${ageH}h ago (fresh)`
+        : ` · downloaded ${ageH}h ago (stale — open watch to refresh)`;
+    } else {
+      line += ' · not on phone yet';
+    }
+    el.textContent = line;
   }
 
   function clearAllCache() {
@@ -178,9 +221,13 @@
         meta['index.json'] = Date.now();
         meta[st + '.json'] = Date.now();
         localStorage.setItem(CACHE_META, JSON.stringify(meta));
+        /* So status prefers this download over stale URL params from open. */
+        params.set('dataAsOf', state.generated || state.updated || (state.snapshot && state.snapshot.asOf) || '');
+        params.set('downloadedAt', String(Date.now()));
       });
-      document.getElementById('cacheStatus').textContent =
-        'Cache: refreshed — Save & close to reload the watch';
+      updateCacheStatus();
+      const el = document.getElementById('cacheStatus');
+      if (el) el.textContent += ' — Save & close to reload the watch';
     } catch (e) {
       document.getElementById('cacheStatus').textContent = 'Download failed: ' + e.message;
     }
