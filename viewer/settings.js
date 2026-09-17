@@ -390,15 +390,26 @@
     const lat = Number(p.areaLat);
     const lng = Number(p.areaLng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01) return null;
     return { lat, lng };
   }
 
   function centerMapOnPrefs(p, opts) {
     if (!map) return false;
-    const c = suburbCoords(p || prefs());
+    const src = p || prefs();
+    const c = suburbCoords(src);
     if (!c) return false;
-    const zoom = opts && opts.zoom != null ? opts.zoom : Math.max(map.getZoom() || 13, 13);
-    map.setView([c.lat, c.lng], zoom);
+    const km =
+      Number((opts && opts.radiusKm) || src.areaRadiusKm || document.getElementById('areaRadiusKm')?.value) ||
+      15;
+    const zoomFloor = opts && opts.zoom != null ? opts.zoom : 13;
+    try {
+      const ring = L.circle([c.lat, c.lng], { radius: Math.max(1, km) * 1000 });
+      map.fitBounds(ring.getBounds(), { padding: [28, 28], maxZoom: 15 });
+    } catch (_) {
+      map.setView([c.lat, c.lng], zoomFloor);
+    }
+    if (map.getZoom() < zoomFloor) map.setZoom(zoomFloor);
     updateSuburbCircle();
     return true;
   }
@@ -417,8 +428,10 @@
       );
       if (hit) return hit;
     }
-    if (p.areaLabel) {
-      const label = String(p.areaLabel).toLowerCase();
+    const labelCandidates = [p.areaLabel, document.getElementById('suburbQuery')?.value]
+      .map((s) => String(s || '').trim().toLowerCase())
+      .filter(Boolean);
+    for (const label of labelCandidates) {
       const hit = suburbIndex.find((r) => r.label.toLowerCase() === label);
       if (hit) return hit;
     }
@@ -444,14 +457,39 @@
     });
   }
 
+  function applyAreaQueryParams(p) {
+    const next = Object.assign({}, p || prefs());
+    const latRaw = params.get('areaLat');
+    const lngRaw = params.get('areaLng');
+    const alat = latRaw != null && latRaw !== '' ? Number(latRaw) : NaN;
+    const alng = lngRaw != null && lngRaw !== '' ? Number(lngRaw) : NaN;
+    if (Number.isFinite(alat) && Number.isFinite(alng)) {
+      next.areaLat = alat;
+      next.areaLng = alng;
+    }
+    const label = params.get('areaLabel');
+    if (label) next.areaLabel = label;
+    const suburb = params.get('areaSuburb');
+    if (suburb) next.areaSuburb = suburb;
+    const postcode = params.get('areaPostcode');
+    if (postcode) next.areaPostcode = postcode;
+    const state = params.get('areaState');
+    if (state) next.areaState = state;
+    const radius = params.get('areaRadiusKm');
+    if (radius != null && radius !== '') {
+      const km = Number(radius);
+      if (Number.isFinite(km) && km >= 1 && km <= 100) next.areaRadiusKm = Math.round(km);
+    }
+    return next;
+  }
+
   function initMap(initialPrefs) {
     const p = initialPrefs || prefs();
     const c = suburbCoords(p);
     const lat = c ? c.lat : -33.8688;
     const lng = c ? c.lng : 151.2093;
-    const hasSuburb = !!c;
-    /* Zoom 13+ is required for station pins to render */
-    map = L.map('map').setView([lat, lng], 13);
+    const wantsSuburb = !!(c || p.areaLabel || p.areaSuburb || p.areaPostcode);
+    map = L.map('map', { fadeAnimation: false }).setView([lat, lng], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap',
       maxZoom: 18,
@@ -464,7 +502,8 @@
     updateSuburbCircle();
 
     const finishCenter = () => {
-      map.invalidateSize();
+      if (!map) return false;
+      map.invalidateSize({ animate: false });
       const latest = ensureSuburbCoords(prefs());
       if (centerMapOnPrefs(latest, { zoom: 13 })) {
         loadStationsInView();
@@ -473,52 +512,70 @@
       return false;
     };
 
-    /* Leaflet often needs a second setView after layout / webview paint */
-    requestAnimationFrame(() => {
+    map.whenReady(() => {
       finishCenter();
-      setTimeout(finishCenter, 200);
-      setTimeout(finishCenter, 600);
+      setTimeout(finishCenter, 150);
+      setTimeout(finishCenter, 500);
+      setTimeout(finishCenter, 1200);
     });
 
-    if (!hasSuburb && !(p.areaLabel || p.areaSuburb || p.areaPostcode)) {
-      if (typeof navigator !== 'undefined' && navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            if (suburbCoords(prefs())) return;
-            map.setView([pos.coords.latitude, pos.coords.longitude], 13);
-            loadStationsInView();
-          },
-          () => {
-            loadStationsInView();
-          },
-          { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 }
-        );
-      } else {
-        loadStationsInView();
-      }
+    if (!wantsSuburb && typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (suburbCoords(prefs()) || document.getElementById('suburbQuery')?.value?.trim()) return;
+          map.setView([pos.coords.latitude, pos.coords.longitude], 13);
+          loadStationsInView();
+        },
+        () => {
+          loadStationsInView();
+        },
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 }
+      );
     } else {
       loadStationsInView();
     }
   }
 
-  function rankColor(pct) {
-    const t = Math.max(0, Math.min(100, pct)) / 100;
-    const stops = [
-      [239, 68, 68],
-      [255, 255, 255],
-      [34, 197, 94],
-    ];
-    const i = t < 0.5 ? 0 : 1;
-    const u = t < 0.5 ? t * 2 : (t - 0.5) * 2;
-    const a = stops[i];
-    const b = stops[i + 1];
-    const rgb = a.map((c, j) => Math.round(c + (b[j] - c) * u));
-    return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  /** Green (cheap) -> red (dear); matches viewer. */
+  function priceHeatColor(t) {
+    const x = Math.max(0, Math.min(1, t));
+    const hue = 120 * (1 - x);
+    return `hsl(${hue}, 72%, 42%)`;
+  }
+
+  function stationMarkerIcon(stn, extent, active) {
+    const price = stn.price;
+    const showLoaded = price != null;
+    const isCheapest = showLoaded && extent && price === extent.min;
+    const state = showLoaded ? 'loaded' : 'pending';
+    const cheapest = isCheapest ? ' cheapest' : '';
+    const activeCls = active ? ' active' : '';
+    let heatStyle = '';
+    if (showLoaded && extent && !isCheapest) {
+      const t = extent.max === extent.min ? 0 : (price - extent.min) / (extent.max - extent.min);
+      heatStyle = ` style="--pin-heat:${priceHeatColor(t)}"`;
+    }
+    const priceLabel = showLoaded ? `${price.toFixed(1)}c` : '';
+    const logo = window.brandLogoFor ? brandLogoFor(stn.meta.brand) : '';
+    return L.divIcon({
+      className: 'station-div-icon',
+      html: `
+        <div class="station-marker ${state}${cheapest}${activeCls}" data-id="${escapeHtml(stn.id)}"${heatStyle}>
+          ${showLoaded ? `<span class="marker-price">${escapeHtml(priceLabel)}</span>` : ''}
+          <div class="marker-pin-wrap">
+            <div class="marker-pin-head">${logo ? `<img src="${logo}" alt="" />` : ''}</div>
+            <div class="marker-pin-tail"></div>
+          </div>
+        </div>
+      `,
+      iconSize: [52, 58],
+      iconAnchor: [26, 58],
+    });
   }
 
   async function loadStationsInView() {
     if (!map || map.getZoom() < 13) {
-      markerLayer.clearLayers();
+      if (markerLayer) markerLayer.clearLayers();
       return;
     }
     const p = readFormPrefs();
@@ -526,11 +583,8 @@
     const st = p.homeState || 'NSW';
     try {
       const catalog = await fetch(`${dataBase}/v1/stations/${st}/catalog.json`).then((r) => r.json());
-      const index = await fetch(`${dataBase}/v1/index.json`).then((r) => r.json()).catch(() => null);
-      let dayIso = null;
-      /* resolve latest day via listing not available — try today-ish from state file */
       const stateFile = await fetch(`${dataBase}/v1/${st}.json`).then((r) => r.json());
-      dayIso =
+      const dayIso =
         (stateFile.snapshot && stateFile.snapshot.asOf && String(stateFile.snapshot.asOf).slice(0, 10)) ||
         null;
       if (!dayIso) return;
@@ -557,28 +611,13 @@
         visible.push({ id, meta, price, state: st });
         if (price != null) prices.push(price);
       }
-      const min = prices.length ? Math.min(...prices) : 0;
-      const max = prices.length ? Math.max(...prices) : 1;
+      const extent = prices.length
+        ? { min: Math.min(...prices), max: Math.max(...prices) }
+        : null;
       markerLayer.clearLayers();
       for (const stn of visible) {
-        let heat = '#3d9cf5';
-        let cheapest = false;
-        if (stn.price != null && max > min) {
-          const pct =
-            stn.price <= min ? 100 : Math.max(0, Math.min(100, ((max - stn.price) / (max - min)) * 100));
-          heat = rankColor(pct);
-          cheapest = stn.price === min;
-        }
-        if (cheapest) heat = '#e8c547';
-        const logo = window.brandLogoFor ? brandLogoFor(stn.meta.brand) : '';
-        const icon = L.divIcon({
-          className: 'station-div-icon',
-          html: `<div class="station-marker" style="--pin-heat:${heat}"><div class="marker-pin-wrap"><div class="marker-pin-head">${
-            logo ? `<img src="${logo}" alt="" />` : ''
-          }</div><div class="marker-pin-tail"></div></div></div>`,
-          iconSize: [28, 38],
-          iconAnchor: [14, 38],
-        });
+        const active = selectedStation && selectedStation.id === stn.id;
+        const icon = stationMarkerIcon(stn, extent, active);
         const m = L.marker([stn.meta.lat, stn.meta.lng], { icon });
         m.on('click', () => {
           selectedStation = {
@@ -591,6 +630,7 @@
           document.getElementById('popupName').textContent =
             `${selectedStation.name}${stn.price != null ? ' · ' + stn.price.toFixed(1) + 'c' : ''}`;
           document.getElementById('stationPopup').classList.remove('hidden');
+          loadStationsInView();
         });
         m.addTo(markerLayer);
         stationCache.set(stn.id, selectedStation);
@@ -609,6 +649,8 @@
         p = UserPrefs.save(JSON.parse(injected));
       }
     } catch (_) {}
+    /* Dedicated area* params survive when the prefs JSON URL is truncated */
+    p = UserPrefs.save(applyAreaQueryParams(p));
     applyPrefsToForm(p);
     updateCacheStatus();
     initMap(p);
@@ -618,6 +660,7 @@
     document.getElementById('areaRadiusKm').onchange = () => {
       UserPrefs.update({ areaRadiusKm: Number(document.getElementById('areaRadiusKm').value) || 15 });
       updateSuburbCircle();
+      centerMapOnPrefs(prefs(), { zoom: 13 });
     };
     document.getElementById('suburbQuery').oninput = (ev) => {
       const box = document.getElementById('suburbSuggest');
@@ -656,6 +699,8 @@
     };
     document.getElementById('btnClosePopup').onclick = () => {
       document.getElementById('stationPopup').classList.add('hidden');
+      selectedStation = null;
+      loadStationsInView();
     };
     document.getElementById('btnSave').onclick = () => closeToWatch();
   }
