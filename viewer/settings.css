@@ -95,7 +95,8 @@ button.secondary {
   border-radius: 6px;
 }
 .hidden { display: none; }
-.station-marker { text-align: center; }
+.station-marker { text-align: center; line-height: 1.1; }
+.marker-pin-wrap { display: flex; flex-direction: column; align-items: center; }
 .marker-pin-head {
   width: 26px; height: 26px; border-radius: 50%;
   border: 2px solid #111; overflow: hidden;
@@ -103,4 +104,12 @@ button.secondary {
   margin: 0 auto;
 }
 .marker-pin-head img { width: 20px; height: 20px; object-fit: contain; }
+.marker-pin-tail {
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 10px solid var(--pin-heat, #22c55e);
+  margin-top: -2px;
+}
 .station-div-icon { background: transparent !important; border: none !important; }

@@ -354,9 +354,11 @@
 
   function initMap() {
     const p = prefs();
-    const lat = p.areaLat || -33.8688;
-    const lng = p.areaLng || 151.2093;
-    map = L.map('map').setView([lat, lng], 12);
+    const hasSuburb = p.areaLat != null && p.areaLng != null;
+    const lat = hasSuburb ? Number(p.areaLat) : -33.8688;
+    const lng = hasSuburb ? Number(p.areaLng) : 151.2093;
+    /* Zoom 13+ is required for station pins to render */
+    map = L.map('map').setView([lat, lng], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap',
       maxZoom: 18,
@@ -367,6 +369,20 @@
       initMap._t = setTimeout(loadStationsInView, 400);
     });
     updateSuburbCircle();
+    if (!hasSuburb && typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          map.setView([pos.coords.latitude, pos.coords.longitude], 13);
+          loadStationsInView();
+        },
+        () => {
+          loadStationsInView();
+        },
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 }
+      );
+    } else {
+      loadStationsInView();
+    }
   }
 
   function rankColor(pct) {
@@ -441,11 +457,11 @@
         const logo = window.brandLogoFor ? brandLogoFor(stn.meta.brand) : '';
         const icon = L.divIcon({
           className: 'station-div-icon',
-          html: `<div class="station-marker" style="--pin-heat:${heat}"><div class="marker-pin-head">${
+          html: `<div class="station-marker" style="--pin-heat:${heat}"><div class="marker-pin-wrap"><div class="marker-pin-head">${
             logo ? `<img src="${logo}" alt="" />` : ''
-          }</div></div>`,
-          iconSize: [28, 36],
-          iconAnchor: [14, 36],
+          }</div><div class="marker-pin-tail"></div></div></div>`,
+          iconSize: [28, 38],
+          iconAnchor: [14, 38],
         });
         const m = L.marker([stn.meta.lat, stn.meta.lng], { icon });
         m.on('click', () => {
