@@ -600,9 +600,33 @@
     });
   }
 
+  function syncSuburbCoordsFromIndex(p) {
+    const cur = p || prefs();
+    const hit = findSuburbForPrefs(cur);
+    if (!hit || hit.lat == null || hit.lng == null) return cur;
+    const existing = suburbCoords(cur);
+    if (
+      existing &&
+      Math.hypot(existing.lat - Number(hit.lat), existing.lng - Number(hit.lng)) < 0.0005
+    ) {
+      return cur;
+    }
+    return UserPrefs.update({
+      areaSuburb: hit.suburb,
+      areaPostcode: hit.postcode,
+      areaState: hit.state,
+      areaLabel: hit.label,
+      areaLat: Number(hit.lat),
+      areaLng: Number(hit.lng),
+    });
+  }
+
   async function refineSavedSuburbIfNeeded() {
     const p = prefs();
     if (!p.areaSuburb) return p;
+    /* Prefer authoritative index coords (G-NAF localities) when available */
+    const fromIndex = syncSuburbCoordsFromIndex(p);
+    if (fromIndex !== p && suburbCoords(fromIndex)) return fromIndex;
     const refined = await refineSuburbCoords({
       suburb: p.areaSuburb,
       postcode: p.areaPostcode,
@@ -610,13 +634,10 @@
       lat: p.areaLat,
       lng: p.areaLng,
     });
-    if (!refined) return p;
-    const old = suburbCoords(p);
-    if (
-      old &&
-      Math.hypot(old.lat - refined.lat, old.lng - refined.lng) < 0.001
-    ) {
-      return p;
+    if (!refined) return fromIndex;
+    const old = suburbCoords(fromIndex);
+    if (old && Math.hypot(old.lat - refined.lat, old.lng - refined.lng) < 0.001) {
+      return fromIndex;
     }
     return UserPrefs.update({
       areaLat: refined.lat,
