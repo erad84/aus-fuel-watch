@@ -593,6 +593,7 @@
       map = null;
       markerLayer = null;
       suburbCircle = null;
+      suburbCenterMarker = null;
     }
     map = L.map(el, { fadeAnimation: false, zoomAnimation: false }).setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -607,12 +608,12 @@
 
     const finishCenter = () => {
       if (!map) return false;
-      map.invalidateSize({ animate: false });
       const latest = ensureSuburbCoords(prefs());
       if (centerMapOnPrefs(latest, { zoom: 14 })) {
         loadStationsInView();
         return true;
       }
+      map.invalidateSize({ animate: false, pan: false });
       return false;
     };
 
