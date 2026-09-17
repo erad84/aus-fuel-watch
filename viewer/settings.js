@@ -306,7 +306,6 @@
     }
     const fixed = ensureSuburbCoords(prefs());
     if (map) {
-      map.invalidateSize({ animate: false });
       centerMapOnPrefs(fixed, { zoom: 14 });
       loadStationsInView();
     }
@@ -367,21 +366,30 @@
     });
     document.getElementById('suburbQuery').value = row.label;
     document.getElementById('suburbSuggest').classList.remove('open');
+    const target = { areaLat: row.lat, areaLng: row.lng, areaRadiusKm: prefs().areaRadiusKm };
     if (map && row.lat != null) {
-      centerMapOnPrefs(
-        { areaLat: row.lat, areaLng: row.lng },
-        { zoom: 14 }
-      );
+      const el = document.getElementById('map');
+      if (el && el.scrollIntoView) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'instant' in window ? 'instant' : 'auto' });
+      }
+      centerMapOnPrefs(target, { zoom: 14 });
       loadStationsInView();
+    } else {
+      updateSuburbCircle();
     }
-    updateSuburbCircle();
   }
+
+  let suburbCenterMarker = null;
 
   function updateSuburbCircle() {
     const p = prefs();
     if (suburbCircle) {
       if (map) map.removeLayer(suburbCircle);
       suburbCircle = null;
+    }
+    if (suburbCenterMarker) {
+      if (map) map.removeLayer(suburbCenterMarker);
+      suburbCenterMarker = null;
     }
     const c = suburbCoords(p);
     if (!map || !c) return;
@@ -391,6 +399,13 @@
       color: '#3d9cf5',
       weight: 2,
       fillOpacity: 0.08,
+    }).addTo(map);
+    suburbCenterMarker = L.circleMarker([c.lat, c.lng], {
+      radius: 5,
+      color: '#fff',
+      weight: 2,
+      fillColor: '#3d9cf5',
+      fillOpacity: 1,
     }).addTo(map);
   }
 
@@ -404,16 +419,47 @@
     return { lat, lng };
   }
 
+  /** Force suburb lat/lng to the geometric centre of the map container. */
+  function hardCenterMap(lat, lng, zoom) {
+    if (!map) return false;
+    const z = Math.max(13, zoom == null ? 14 : zoom);
+    const target = L.latLng(lat, lng);
+    /* pan:false — default pan:true shifts centre when container size was wrong */
+    map.invalidateSize({ animate: false, pan: false });
+    map.setView(target, z, { animate: false });
+    const size = map.getSize();
+    if (size.x > 0 && size.y > 0) {
+      const mid = map.containerPointToLatLng([size.x / 2, size.y / 2]);
+      const a = map.project(target, z);
+      const b = map.project(mid, z);
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        map.panBy([dx, dy], { animate: false });
+      }
+    }
+    return true;
+  }
+
   function centerMapOnPrefs(p, opts) {
     if (!map) return false;
     const src = p || prefs();
     const c = suburbCoords(src);
     if (!c) return false;
-    /* Fixed zoom only — fitBounds on the 15 km circle zooms out to ~11 and
-     * metro suburbs look the same as the Sydney default. */
     const zoom = opts && opts.zoom != null ? opts.zoom : 14;
-    map.setView([c.lat, c.lng], Math.max(13, zoom), { animate: false });
+    hardCenterMap(c.lat, c.lng, zoom);
     updateSuburbCircle();
+    /* Re-apply after layout / webview chrome settles */
+    clearTimeout(centerMapOnPrefs._t);
+    centerMapOnPrefs._t = setTimeout(() => {
+      hardCenterMap(c.lat, c.lng, zoom);
+      updateSuburbCircle();
+    }, 100);
+    clearTimeout(centerMapOnPrefs._t2);
+    centerMapOnPrefs._t2 = setTimeout(() => {
+      hardCenterMap(c.lat, c.lng, zoom);
+      updateSuburbCircle();
+    }, 350);
     return true;
   }
 
