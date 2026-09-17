@@ -78,10 +78,18 @@ button.secondary {
 .fav-list li {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 0.5rem;
   padding: 0.45rem 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
+}
+.fav-list .fav-name { flex: 1; min-width: 0; }
+.fav-list .fav-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; flex-shrink: 0; }
+.fav-list .fav-actions button { margin: 0; font-size: 0.75rem; padding: 0.35rem 0.5rem; }
+.fav-list .fav-actions button.is-default {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 #map {
   height: 320px;
@@ -105,11 +113,26 @@ button.secondary {
 }
 .marker-pin-head img { width: 20px; height: 20px; object-fit: contain; }
 .marker-pin-tail {
+  position: relative;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 9px solid var(--pin-heat, #22c55e);
+  margin-top: -1px;
+  z-index: 1;
+}
+/* Black outline around the pin arrow */
+.marker-pin-tail::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: -11px;
   width: 0;
   height: 0;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
-  border-top: 10px solid var(--pin-heat, #22c55e);
-  margin-top: -2px;
+  border-top: 11px solid #111;
+  z-index: -1;
 }
 .station-div-icon { background: transparent !important; border: none !important; }

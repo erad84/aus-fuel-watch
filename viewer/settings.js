@@ -88,6 +88,7 @@
   function renderFavs() {
     const ul = document.getElementById('favList');
     const list = UserPrefs.listFavourites();
+    const defaultId = UserPrefs.getDefaultFavouriteId();
     ul.innerHTML = '';
     if (!list.length) {
       ul.innerHTML = '<li class="hint">None yet — pick from the map</li>';
@@ -95,7 +96,26 @@
     }
     for (const f of list) {
       const li = document.createElement('li');
-      li.innerHTML = `<span>${escapeHtml(f.name || f.id)}${f.suburb ? ' · ' + escapeHtml(f.suburb) : ''}</span>`;
+      const name = document.createElement('span');
+      name.className = 'fav-name';
+      name.textContent = `${f.name || f.id}${f.suburb ? ' · ' + f.suburb : ''}`;
+      li.appendChild(name);
+
+      const actions = document.createElement('span');
+      actions.className = 'fav-actions';
+
+      const setDef = document.createElement('button');
+      setDef.type = 'button';
+      setDef.className = 'secondary' + (f.id === defaultId ? ' is-default' : '');
+      setDef.textContent = f.id === defaultId ? 'Default' : 'Set default';
+      setDef.disabled = f.id === defaultId;
+      setDef.onclick = () => {
+        UserPrefs.setDefaultFavourite(f.id);
+        renderFavs();
+        renderDefault();
+      };
+      actions.appendChild(setDef);
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'secondary';
@@ -105,7 +125,9 @@
         renderFavs();
         renderDefault();
       };
-      li.appendChild(btn);
+      actions.appendChild(btn);
+
+      li.appendChild(actions);
       ul.appendChild(li);
     }
   }
@@ -265,14 +287,22 @@
         if (!r.ok) continue;
         const data = await r.json();
         suburbIndex = ingestSuburbs(data);
-        if (suburbIndex.length) return;
+        if (suburbIndex.length) break;
       } catch (_) {}
     }
-    if (window.AFW_SUBURBS) {
+    if (!suburbIndex.length && window.AFW_SUBURBS) {
       suburbIndex = ingestSuburbs(window.AFW_SUBURBS);
-      if (suburbIndex.length) return;
     }
-    console.warn('suburbs: no index loaded');
+    if (!suburbIndex.length) {
+      console.warn('suburbs: no index loaded');
+      return;
+    }
+    const fixed = ensureSuburbCoords(prefs());
+    if (map) {
+      map.invalidateSize();
+      centerMapOnPrefs(fixed, { zoom: 13 });
+      loadStationsInView();
+    }
   }
 
   function ingestSuburbs(data) {
@@ -330,7 +360,10 @@
     document.getElementById('suburbQuery').value = row.label;
     document.getElementById('suburbSuggest').classList.remove('open');
     if (map && row.lat != null) {
-      map.setView([row.lat, row.lng], 13);
+      centerMapOnPrefs(
+        { areaLat: row.lat, areaLng: row.lng },
+        { zoom: 13 }
+      );
       loadStationsInView();
     }
     updateSuburbCircle();
@@ -344,7 +377,7 @@
     }
     if (!map || p.areaLat == null || p.areaLng == null) return;
     const km = Number(document.getElementById('areaRadiusKm').value) || p.areaRadiusKm || 15;
-    suburbCircle = L.circle([p.areaLat, p.areaLng], {
+    suburbCircle = L.circle([Number(p.areaLat), Number(p.areaLng)], {
       radius: km * 1000,
       color: '#3d9cf5',
       weight: 2,
@@ -352,11 +385,71 @@
     }).addTo(map);
   }
 
-  function initMap() {
-    const p = prefs();
-    const hasSuburb = p.areaLat != null && p.areaLng != null;
-    const lat = hasSuburb ? Number(p.areaLat) : -33.8688;
-    const lng = hasSuburb ? Number(p.areaLng) : 151.2093;
+  function suburbCoords(p) {
+    if (!p) return null;
+    const lat = Number(p.areaLat);
+    const lng = Number(p.areaLng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  }
+
+  function centerMapOnPrefs(p, opts) {
+    if (!map) return false;
+    const c = suburbCoords(p || prefs());
+    if (!c) return false;
+    const zoom = opts && opts.zoom != null ? opts.zoom : Math.max(map.getZoom() || 13, 13);
+    map.setView([c.lat, c.lng], zoom);
+    updateSuburbCircle();
+    return true;
+  }
+
+  function findSuburbForPrefs(p) {
+    if (!suburbIndex.length || !p) return null;
+    const postcode = p.areaPostcode ? String(p.areaPostcode).padStart(4, '0') : '';
+    const suburb = (p.areaSuburb || '').toLowerCase();
+    const state = (p.areaState || p.homeState || '').toUpperCase();
+    if (postcode && suburb) {
+      const hit = suburbIndex.find(
+        (r) =>
+          r.postcode === postcode &&
+          r.suburb.toLowerCase() === suburb &&
+          (!state || r.state === state)
+      );
+      if (hit) return hit;
+    }
+    if (p.areaLabel) {
+      const label = String(p.areaLabel).toLowerCase();
+      const hit = suburbIndex.find((r) => r.label.toLowerCase() === label);
+      if (hit) return hit;
+    }
+    if (postcode) {
+      const hit = suburbIndex.find((r) => r.postcode === postcode && (!state || r.state === state));
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function ensureSuburbCoords(p) {
+    const cur = p || prefs();
+    if (suburbCoords(cur)) return cur;
+    const hit = findSuburbForPrefs(cur);
+    if (!hit) return cur;
+    return UserPrefs.update({
+      areaSuburb: hit.suburb,
+      areaPostcode: hit.postcode,
+      areaState: hit.state,
+      areaLabel: hit.label,
+      areaLat: hit.lat,
+      areaLng: hit.lng,
+    });
+  }
+
+  function initMap(initialPrefs) {
+    const p = initialPrefs || prefs();
+    const c = suburbCoords(p);
+    const lat = c ? c.lat : -33.8688;
+    const lng = c ? c.lng : 151.2093;
+    const hasSuburb = !!c;
     /* Zoom 13+ is required for station pins to render */
     map = L.map('map').setView([lat, lng], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -369,17 +462,40 @@
       initMap._t = setTimeout(loadStationsInView, 400);
     });
     updateSuburbCircle();
-    if (!hasSuburb && typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          map.setView([pos.coords.latitude, pos.coords.longitude], 13);
-          loadStationsInView();
-        },
-        () => {
-          loadStationsInView();
-        },
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 }
-      );
+
+    const finishCenter = () => {
+      map.invalidateSize();
+      const latest = ensureSuburbCoords(prefs());
+      if (centerMapOnPrefs(latest, { zoom: 13 })) {
+        loadStationsInView();
+        return true;
+      }
+      return false;
+    };
+
+    /* Leaflet often needs a second setView after layout / webview paint */
+    requestAnimationFrame(() => {
+      finishCenter();
+      setTimeout(finishCenter, 200);
+      setTimeout(finishCenter, 600);
+    });
+
+    if (!hasSuburb && !(p.areaLabel || p.areaSuburb || p.areaPostcode)) {
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (suburbCoords(prefs())) return;
+            map.setView([pos.coords.latitude, pos.coords.longitude], 13);
+            loadStationsInView();
+          },
+          () => {
+            loadStationsInView();
+          },
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 }
+        );
+      } else {
+        loadStationsInView();
+      }
     } else {
       loadStationsInView();
     }
@@ -495,7 +611,7 @@
     } catch (_) {}
     applyPrefsToForm(p);
     updateCacheStatus();
-    initMap();
+    initMap(p);
     loadSuburbs();
 
     document.getElementById('btnDownloadLatest').onclick = () => downloadLatest();
@@ -524,6 +640,7 @@
       if (!selectedStation) return;
       UserPrefs.addFavourite(selectedStation);
       renderFavs();
+      renderDefault();
     };
     document.getElementById('btnSetDefault').onclick = () => {
       if (!selectedStation) return;
@@ -533,9 +650,8 @@
       renderDefault();
     };
     document.getElementById('btnClearDefault').onclick = () => {
-      const cur = prefs();
-      cur.defaultFavouriteId = null;
-      UserPrefs.save(cur);
+      UserPrefs.clearDefaultFavourite();
+      renderFavs();
       renderDefault();
     };
     document.getElementById('btnClosePopup').onclick = () => {
