@@ -158,7 +158,15 @@
       (state && (state.generated || state.updated)) ||
       (state && state.snapshot && state.snapshot.asOf) ||
       '';
-    const asOfRaw = localAsOf || urlAsOf;
+    /* Prefer watch companion URL (what the watch actually shows). Webview
+     * localStorage is a separate older cache and was winning here before. */
+    let asOfRaw = urlAsOf || localAsOf;
+    if (urlAsOf && localAsOf) {
+      const tu = Date.parse(urlAsOf);
+      const tl = Date.parse(localAsOf);
+      if (Number.isFinite(tu) && Number.isFinite(tl) && tl > tu) asOfRaw = localAsOf;
+      else asOfRaw = urlAsOf;
+    }
     const asOfLabel = asOfRaw ? formatAsOfLocal(asOfRaw) : '';
 
     let meta = {};
@@ -166,8 +174,10 @@
       meta = JSON.parse(localStorage.getItem(CACHE_META) || '{}');
     } catch (_) {}
     let downloadedAt = meta[stateKey];
-    if (typeof downloadedAt !== 'number' && Number.isFinite(urlDownloadedAt)) {
-      downloadedAt = urlDownloadedAt;
+    if (Number.isFinite(urlDownloadedAt)) {
+      if (typeof downloadedAt !== 'number' || urlDownloadedAt >= downloadedAt) {
+        downloadedAt = urlDownloadedAt;
+      }
     }
 
     if (!asOfLabel && (downloadedAt == null || typeof downloadedAt !== 'number')) {
