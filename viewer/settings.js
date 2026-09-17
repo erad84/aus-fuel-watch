@@ -346,6 +346,14 @@
         null;
       if (!dayIso) return;
       const day = await fetch(`${dataBase}/v1/stations/${st}/days/${dayIso}.json`).then((r) => r.json());
+      const priceById = {};
+      const rows = Array.isArray(day.s) ? day.s : [];
+      for (const row of rows) {
+        if (Array.isArray(row) && row.length >= 2) priceById[row[0]] = row[1];
+      }
+      if (day.prices && typeof day.prices === 'object') {
+        Object.assign(priceById, day.prices);
+      }
       const bounds = map.getBounds();
       const fuel = (p.preferredFuel || 'U91').replace(/\+.*/, '');
       const prices = [];
@@ -355,7 +363,7 @@
         if (!meta || meta.lat == null || meta.lng == null) continue;
         if (p.excludeCostco && /costco/i.test(meta.brand || '')) continue;
         if (!bounds.contains([meta.lat, meta.lng])) continue;
-        const pr = day.prices && day.prices[id] && day.prices[id][fuel];
+        const pr = priceById[id] && priceById[id][fuel];
         const price = pr != null ? Number(pr) / 10 : null;
         visible.push({ id, meta, price, state: st });
         if (price != null) prices.push(price);
