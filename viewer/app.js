@@ -5099,9 +5099,17 @@ function updateMapZoomHint() {
 
 function syncStationsSideHeight() {
   const side = document.querySelector('.stations-side');
-  if (!side) return;
-  // Favourites viewport is taller than the map; do not clip the side to map height.
-  side.style.height = '';
+  const mapBox = document.querySelector('.map-container');
+  if (!side || !mapBox) return;
+  if (window.matchMedia('(max-width: 900px)').matches) {
+    side.style.height = '';
+    side.style.maxHeight = '';
+    return;
+  }
+  const h = Math.round(mapBox.getBoundingClientRect().height);
+  if (h <= 0) return;
+  side.style.height = `${h}px`;
+  side.style.maxHeight = `${h}px`;
 }
 
 function syncMapToFuelGraphWidth() {
@@ -5117,11 +5125,13 @@ function syncMapToFuelGraphWidth() {
 
 function watchMapSize() {
   const chartWrap = document.querySelector('.panel-chart .chart-wrap');
-  if (!chartWrap || typeof ResizeObserver === 'undefined') return;
+  const mapBox = document.querySelector('.map-container');
+  if (typeof ResizeObserver === 'undefined') return;
   const ro = new ResizeObserver(() => {
     syncMapToFuelGraphWidth();
   });
-  ro.observe(chartWrap);
+  if (chartWrap) ro.observe(chartWrap);
+  if (mapBox) ro.observe(mapBox);
 }
 
 function scheduleStationFetch() {
