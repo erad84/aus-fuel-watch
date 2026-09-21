@@ -3073,20 +3073,20 @@
       "mogas95": 104.6,
       "mogas95Source": "cme",
       "mogas95Usd": 118.469,
-      "gasoil": 160.6,
+      "gasoil": 157.2,
       "gasoilSource": "cme",
-      "gasoilUsd": 181.798,
-      "fxAudUsd": 0.712048
+      "gasoilUsd": 178.05,
+      "fxAudUsd": 0.712352
     }
   ],
   "lastFetch": {
-    "at": "2026-09-21T20:14:36.145Z",
+    "at": "2026-09-21T21:34:23.230Z",
     "liveIso": "2026-09-21",
     "mogas95Usd": 118.469,
-    "gasoilUsd": 181.798,
+    "gasoilUsd": 178.05,
     "dayCount": 333,
     "mogasCmeDays": 7,
     "gasoilCmeDays": 7
   },
-  "lagCalibUpdated": "2026-09-21T20:14:36.302Z"
+  "lagCalibUpdated": "2026-09-21T21:34:23.365Z"
 }
