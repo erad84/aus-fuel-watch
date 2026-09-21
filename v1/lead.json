@@ -1,6 +1,6 @@
 {
   "source": "NYMEX Singapore Mogas 95 / Gasoil (Platts) delayed settles; history reshaped from AIP weekly + Brent; FX Yahoo AUDUSD",
-  "updated": "2026-09-18",
+  "updated": "2026-09-21",
   "symbols": {
     "mogas95": "NYMEX:AV01!",
     "gasoil": "NYMEX:SGB1!"
@@ -17,7 +17,7 @@
       "SA": 10,
       "TAS": 12,
       "NT": 10,
-      "ACT": 6
+      "ACT": 5
     }
   },
   "days": [
@@ -2981,20 +2981,20 @@
     {
       "date": "2026-09-12",
       "mogas95": 120.7,
-      "mogas95Source": "brent_extend",
+      "mogas95Source": "brent_reshape",
       "mogas95Usd": 137.322,
       "gasoil": 152.3,
-      "gasoilSource": "brent_extend",
+      "gasoilSource": "brent_reshape",
       "gasoilUsd": 173.273,
       "fxAudUsd": 0.7156
     },
     {
       "date": "2026-09-13",
       "mogas95": 120.7,
-      "mogas95Source": "brent_extend",
+      "mogas95Source": "brent_reshape",
       "mogas95Usd": 137.245,
       "gasoil": 152.3,
-      "gasoilSource": "brent_extend",
+      "gasoilSource": "brent_reshape",
       "gasoilUsd": 173.177,
       "fxAudUsd": 0.7152
     },
@@ -3046,17 +3046,47 @@
       "gasoil": 160.6,
       "gasoilSource": "cme",
       "gasoilUsd": 181.798,
-      "fxAudUsd": 0.712149
+      "fxAudUsd": 0.71155
+    },
+    {
+      "date": "2026-09-19",
+      "mogas95": 130.5,
+      "mogas95Source": "brent_extend",
+      "mogas95Usd": 147.631,
+      "gasoil": 170.5,
+      "gasoilSource": "brent_extend",
+      "gasoilUsd": 192.882,
+      "fxAudUsd": 0.71155
+    },
+    {
+      "date": "2026-09-20",
+      "mogas95": 130.5,
+      "mogas95Source": "brent_extend",
+      "mogas95Usd": 147.758,
+      "gasoil": 170.5,
+      "gasoilSource": "brent_extend",
+      "gasoilUsd": 193.047,
+      "fxAudUsd": 0.71216
+    },
+    {
+      "date": "2026-09-21",
+      "mogas95": 104.6,
+      "mogas95Source": "cme",
+      "mogas95Usd": 118.469,
+      "gasoil": 160.6,
+      "gasoilSource": "cme",
+      "gasoilUsd": 181.798,
+      "fxAudUsd": 0.712048
     }
   ],
   "lastFetch": {
-    "at": "2026-09-18T21:33:49.035Z",
-    "liveIso": "2026-09-18",
+    "at": "2026-09-21T20:14:36.145Z",
+    "liveIso": "2026-09-21",
     "mogas95Usd": 118.469,
     "gasoilUsd": 181.798,
-    "dayCount": 330,
-    "mogasCmeDays": 6,
-    "gasoilCmeDays": 6
+    "dayCount": 333,
+    "mogasCmeDays": 7,
+    "gasoilCmeDays": 7
   },
-  "lagCalibUpdated": "2026-09-18T21:33:49.198Z"
+  "lagCalibUpdated": "2026-09-21T20:14:36.302Z"
 }
