@@ -1,6 +1,6 @@
 {
   "source": "AIP weekly (Argus) curated; ACCC fills gaps",
-  "updated": "2026-09-21",
+  "updated": "2026-09-22",
   "lagDays": {
     "default": 10,
     "min": 7,
@@ -368,7 +368,7 @@
     }
   ],
   "lastFetch": {
-    "at": "2026-09-21T21:34:22.337Z",
+    "at": "2026-09-22T23:40:17.681Z",
     "pdfCandidates": 36,
     "pdfsParsed": 36,
     "parsedRows": 72
