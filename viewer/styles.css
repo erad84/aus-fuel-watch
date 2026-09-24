@@ -1034,13 +1034,14 @@ button:hover { filter: brightness(1.08); }
 .fav-e10-compare p { margin: 0.25rem 0; }
 
 .favourites-list {
-  height: 440px;
-  max-height: 440px;
+  flex: 0 1 42%;
+  height: auto;
+  max-height: 42%;
+  min-height: 0;
   overflow: auto;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 6px;
-  flex: 0 0 auto;
 }
 .fav-item {
   display: flex;
@@ -1150,11 +1151,13 @@ button:hover { filter: brightness(1.08); }
   display: flex;
   flex-direction: column;
   min-width: 0;
-  /* Grow with favourites viewport; map stays square independently */
-  min-height: 200px;
-  height: auto !important;
+  min-height: 0;
+  overflow: hidden;
+  /* Height locked to map viewport via syncStationsSideHeight() */
 }
-.stations-side h3 { flex: 0 0 auto; }
+.stations-side h3 { flex: 0 0 auto; margin-top: 0; }
+.stations-side h3 + .station-list,
+.stations-side h3 + .favourites-list { margin-top: 0.35rem; }
 .station-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -1165,11 +1168,17 @@ button:hover { filter: brightness(1.08); }
 @media (max-width: 900px) {
   .stations-side {
     height: auto !important;
-    max-height: none;
+    max-height: none !important;
+    overflow: visible;
   }
   .favourites-list {
+    flex: none;
     height: 280px;
     max-height: 280px;
+  }
+  .station-list {
+    flex: none;
+    max-height: 360px;
   }
 }
 .station-item {

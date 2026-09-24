@@ -78,10 +78,18 @@ button.secondary {
 .fav-list li {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 0.5rem;
   padding: 0.45rem 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
+}
+.fav-list .fav-name { flex: 1; min-width: 0; }
+.fav-list .fav-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; flex-shrink: 0; }
+.fav-list .fav-actions button { margin: 0; font-size: 0.75rem; padding: 0.35rem 0.5rem; }
+.fav-list .fav-actions button.is-default {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 #map {
   height: 320px;
@@ -95,12 +103,97 @@ button.secondary {
   border-radius: 6px;
 }
 .hidden { display: none; }
-.station-marker { text-align: center; }
-.marker-pin-head {
-  width: 26px; height: 26px; border-radius: 50%;
-  border: 2px solid #111; overflow: hidden;
-  background: var(--pin-heat, #22c55e);
-  margin: 0 auto;
+.station-div-icon {
+  background: transparent !important;
+  border: none !important;
 }
-.marker-pin-head img { width: 20px; height: 20px; object-fit: contain; }
-.station-div-icon { background: transparent !important; border: none !important; }
+.station-marker { text-align: center; line-height: 1.1; }
+.marker-price {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(15, 20, 25, 0.92);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  margin: 0 auto 3px;
+  border: 1px solid var(--border);
+}
+.station-marker.cheapest .marker-price {
+  background: #e8c547;
+  color: #111;
+  border-color: #c9a227;
+}
+.station-marker.active .marker-price {
+  border: 3px solid #a855f7;
+  box-shadow: 0 0 0 1px #a855f7, 0 2px 8px rgba(168, 85, 247, 0.45);
+}
+.station-marker.cheapest.active .marker-price {
+  border: 3px solid #a855f7;
+  box-shadow: 0 0 0 1px #a855f7, 0 2px 8px rgba(168, 85, 247, 0.45);
+}
+.marker-pin-wrap { display: flex; flex-direction: column; align-items: center; }
+.marker-pin-head {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #3d9cf5;
+}
+.station-marker.pending .marker-pin-head { background: #3d9cf5; }
+.station-marker.loaded .marker-pin-head {
+  background: var(--pin-heat, #22c55e);
+}
+.marker-pin-head img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+.marker-pin-tail {
+  position: relative;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  margin-top: -2px;
+  z-index: 1;
+}
+.station-marker.pending .marker-pin-tail { border-top: 10px solid #3d9cf5; }
+.station-marker.loaded .marker-pin-tail {
+  border-top: 10px solid var(--pin-heat, #22c55e);
+}
+.station-marker.cheapest .marker-pin-head {
+  background: #e8c547;
+  border-color: #fff8dc;
+  box-shadow: 0 0 0 2px #e8c547, 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.station-marker.cheapest .marker-pin-tail {
+  border-top: 10px solid #e8c547;
+}
+.station-marker.active .marker-pin-head {
+  border-color: #a855f7;
+  box-shadow: 0 0 0 2px #a855f7;
+}
+.station-marker.cheapest.active .marker-pin-head {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #e8c547, 0 0 0 4px #a855f7;
+}
+/* Black outline on pin arrow */
+.marker-pin-tail::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: -12px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 12px solid #111;
+  z-index: -1;
+}

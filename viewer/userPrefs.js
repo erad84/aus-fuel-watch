@@ -89,11 +89,12 @@
       seen.add(n.id);
       base.favourites.push(n);
     }
-    if (raw.defaultFavouriteId != null) {
+    /* Honour explicit null/clear — do not reassign first fav on every load */
+    if (raw.defaultFavouriteId != null && String(raw.defaultFavouriteId).trim() !== '') {
       const did = String(raw.defaultFavouriteId);
       if (base.favourites.some((f) => f.id === did)) base.defaultFavouriteId = did;
-    }
-    if (!base.defaultFavouriteId && base.favourites.length) {
+    } else if (raw.defaultFavouriteId === undefined && base.favourites.length) {
+      /* Migrate older prefs that never had the field */
       base.defaultFavouriteId = base.favourites[0].id;
     }
     base.excludeCostco = raw.excludeCostco !== undefined ? !!raw.excludeCostco : true;
@@ -227,6 +228,12 @@
     return save(prefs);
   }
 
+  function clearDefaultFavourite() {
+    const prefs = load();
+    prefs.defaultFavouriteId = null;
+    return save(prefs);
+  }
+
   function exportJson() {
     return JSON.stringify(load(), null, 2);
   }
@@ -271,6 +278,7 @@
     addFavourite,
     removeFavourite,
     setDefaultFavourite,
+    clearDefaultFavourite,
     exportJson,
     importJson,
     saveLastGood,

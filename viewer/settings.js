@@ -88,6 +88,7 @@
   function renderFavs() {
     const ul = document.getElementById('favList');
     const list = UserPrefs.listFavourites();
+    const defaultId = UserPrefs.getDefaultFavouriteId();
     ul.innerHTML = '';
     if (!list.length) {
       ul.innerHTML = '<li class="hint">None yet — pick from the map</li>';
@@ -95,7 +96,26 @@
     }
     for (const f of list) {
       const li = document.createElement('li');
-      li.innerHTML = `<span>${escapeHtml(f.name || f.id)}${f.suburb ? ' · ' + escapeHtml(f.suburb) : ''}</span>`;
+      const name = document.createElement('span');
+      name.className = 'fav-name';
+      name.textContent = `${f.name || f.id}${f.suburb ? ' · ' + f.suburb : ''}`;
+      li.appendChild(name);
+
+      const actions = document.createElement('span');
+      actions.className = 'fav-actions';
+
+      const setDef = document.createElement('button');
+      setDef.type = 'button';
+      setDef.className = 'secondary' + (f.id === defaultId ? ' is-default' : '');
+      setDef.textContent = f.id === defaultId ? 'Default' : 'Set default';
+      setDef.disabled = f.id === defaultId;
+      setDef.onclick = () => {
+        UserPrefs.setDefaultFavourite(f.id);
+        renderFavs();
+        renderDefault();
+      };
+      actions.appendChild(setDef);
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'secondary';
@@ -105,7 +125,9 @@
         renderFavs();
         renderDefault();
       };
-      li.appendChild(btn);
+      actions.appendChild(btn);
+
+      li.appendChild(actions);
       ul.appendChild(li);
     }
   }
@@ -125,23 +147,76 @@
       .replace(/"/g, '&quot;');
   }
 
+  function formatAsOfLocal(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return String(iso).slice(0, 23);
+    const d = new Date(t);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = d.getDate();
+    const mon = months[d.getMonth()];
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${day} ${mon} ${hh}:${mm}`;
+  }
+
   function updateCacheStatus() {
     const el = document.getElementById('cacheStatus');
+    const p = readFormPrefs();
+    const st = p.homeState || 'NSW';
+    const stateKey = st + '.json';
+
+    /* Companion (pkjs) localStorage is separate from this webview — prefer
+     * asOf / download time passed in the settings URL from the watch. */
+    const urlAsOf = params.get('dataAsOf') || '';
+    const urlDownloaded = params.get('downloadedAt');
+    let urlDownloadedAt = urlDownloaded ? Number(urlDownloaded) : NaN;
+
+    let state = null;
+    try {
+      state = JSON.parse(localStorage.getItem(CACHE_PREFIX + stateKey) || 'null');
+    } catch (_) {}
+    const localAsOf =
+      (state && (state.generated || state.updated)) ||
+      (state && state.snapshot && state.snapshot.asOf) ||
+      '';
+    /* Prefer watch companion URL (what the watch actually shows). Webview
+     * localStorage is a separate older cache and was winning here before. */
+    let asOfRaw = urlAsOf || localAsOf;
+    if (urlAsOf && localAsOf) {
+      const tu = Date.parse(urlAsOf);
+      const tl = Date.parse(localAsOf);
+      if (Number.isFinite(tu) && Number.isFinite(tl) && tl > tu) asOfRaw = localAsOf;
+      else asOfRaw = urlAsOf;
+    }
+    const asOfLabel = asOfRaw ? formatAsOfLocal(asOfRaw) : '';
+
     let meta = {};
     try {
       meta = JSON.parse(localStorage.getItem(CACHE_META) || '{}');
     } catch (_) {}
-    const times = Object.values(meta).filter((n) => typeof n === 'number');
-    if (!times.length) {
-      el.textContent = 'Cache: empty';
+    let downloadedAt = meta[stateKey];
+    if (Number.isFinite(urlDownloadedAt)) {
+      if (typeof downloadedAt !== 'number' || urlDownloadedAt >= downloadedAt) {
+        downloadedAt = urlDownloadedAt;
+      }
+    }
+
+    if (!asOfLabel && (downloadedAt == null || typeof downloadedAt !== 'number')) {
+      el.textContent = 'Cache: empty — tap Download latest';
       return;
     }
-    const newest = Math.max.apply(null, times);
-    const ageH = ((Date.now() - newest) / 3600000).toFixed(1);
-    const fresh = Date.now() - newest < MAX_AGE_MS;
-    el.textContent = fresh
-      ? `Cache: fresh (${ageH}h old, skip re-download under 3h)`
-      : `Cache: stale (${ageH}h old)`;
+    let line = asOfLabel ? `Data as of ${asOfLabel}` : 'Data as of —';
+    if (typeof downloadedAt === 'number') {
+      const ageH = ((Date.now() - downloadedAt) / 3600000).toFixed(1);
+      const fresh = Date.now() - downloadedAt < MAX_AGE_MS;
+      line += fresh
+        ? ` · downloaded ${ageH}h ago (fresh)`
+        : ` · downloaded ${ageH}h ago (stale — open watch to refresh)`;
+    } else {
+      line += ' · not on phone yet';
+    }
+    el.textContent = line;
   }
 
   function clearAllCache() {
@@ -178,9 +253,13 @@
         meta['index.json'] = Date.now();
         meta[st + '.json'] = Date.now();
         localStorage.setItem(CACHE_META, JSON.stringify(meta));
+        /* So status prefers this download over stale URL params from open. */
+        params.set('dataAsOf', state.generated || state.updated || (state.snapshot && state.snapshot.asOf) || '');
+        params.set('downloadedAt', String(Date.now()));
       });
-      document.getElementById('cacheStatus').textContent =
-        'Cache: refreshed — Save & close to reload the watch';
+      updateCacheStatus();
+      const el = document.getElementById('cacheStatus');
+      if (el) el.textContent += ' — Save & close to reload the watch';
     } catch (e) {
       document.getElementById('cacheStatus').textContent = 'Download failed: ' + e.message;
     }
@@ -197,49 +276,83 @@
   }
 
   async function loadSuburbs() {
-    try {
-      const r = await fetch(`${dataBase}/v1/au-suburbs.json`);
-      if (r.ok) {
+    seedSuburbIndex();
+    const sources = [
+      `${dataBase}/v1/au-suburbs.json`,
+      'au-suburbs.json',
+      'https://raw.githubusercontent.com/erad84/aus-fuel-watch/data/v1/au-suburbs.json',
+    ];
+    for (const url of sources) {
+      try {
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const t = ctrl ? setTimeout(() => ctrl.abort(), 4000) : null;
+        const r = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+        if (t) clearTimeout(t);
+        if (!r.ok) continue;
         const data = await r.json();
-        suburbIndex = ingestSuburbs(data);
-        if (suburbIndex.length) return;
-      }
-    } catch (_) {}
-    try {
-      const r = await fetch('au-suburbs.json');
-      const data = await r.json();
-      suburbIndex = ingestSuburbs(data);
-    } catch (e) {
-      console.warn('suburbs', e);
+        const rows = ingestSuburbs(data);
+        if (rows.length) {
+          suburbIndex = rows;
+          break;
+        }
+      } catch (_) {}
     }
+    if (!suburbIndex.length && window.AFW_SUBURBS) {
+      suburbIndex = ingestSuburbs(window.AFW_SUBURBS);
+    }
+    if (!suburbIndex.length) {
+      console.warn('suburbs: no index loaded');
+      return prefs();
+    }
+    const fixed = ensureSuburbCoords(prefs());
+    if (map) {
+      centerMapOnPrefs(fixed, { zoom: 14 });
+      loadStationsInView();
+    }
+    return fixed;
   }
 
   function ingestSuburbs(data) {
-    const rows = data && data.suburbs ? data.suburbs : [];
-    return rows.map((row) => ({
-      suburb: row.s,
-      postcode: row.p,
-      state: row.st,
-      lat: row.lat,
-      lng: row.lng,
-      label: `${row.s} ${row.p} ${row.st}`,
-    }));
+    const rows = data && data.suburbs ? data.suburbs : Array.isArray(data) ? data : [];
+    return rows
+      .map((row) => {
+        const suburb = String(row.s || row.suburb || '').trim();
+        const postcode = String(row.p ?? row.postcode ?? '').padStart(4, '0');
+        const state = String(row.st || row.state || '').toUpperCase();
+        const lat = Number(row.lat);
+        const lng = Number(row.lng);
+        if (!suburb || !postcode || postcode === '0000' || !state) return null;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return {
+          suburb,
+          postcode,
+          state,
+          lat,
+          lng,
+          label: `${suburb} ${postcode} ${state}`,
+        };
+      })
+      .filter(Boolean);
   }
 
   function searchSuburbs(q) {
     const query = String(q || '').trim().toLowerCase();
     if (query.length < 2) return [];
+    const stFilter = (document.getElementById('scopeCombo')?.value || '').split('|')[0];
     const out = [];
+    const starts = [];
     for (const row of suburbIndex) {
-      if (
-        row.label.toLowerCase().includes(query) ||
-        String(row.postcode).startsWith(query)
-      ) {
+      if (stFilter && row.state !== stFilter) continue;
+      const label = row.label.toLowerCase();
+      const pc = String(row.postcode);
+      if (pc.startsWith(query) || row.suburb.toLowerCase().startsWith(query)) {
+        starts.push(row);
+      } else if (label.includes(query)) {
         out.push(row);
-        if (out.length >= 30) break;
       }
+      if (starts.length + out.length >= 40) break;
     }
-    return out;
+    return starts.concat(out).slice(0, 30);
   }
 
   function setSuburb(row) {
@@ -253,22 +366,107 @@
     });
     document.getElementById('suburbQuery').value = row.label;
     document.getElementById('suburbSuggest').classList.remove('open');
+    const target = { areaLat: row.lat, areaLng: row.lng, areaRadiusKm: prefs().areaRadiusKm };
     if (map && row.lat != null) {
-      map.setView([row.lat, row.lng], 13);
+      const el = document.getElementById('map');
+      if (el && el.scrollIntoView) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+      }
+      centerMapOnPrefs(target, { zoom: 14 });
       loadStationsInView();
+    } else {
+      updateSuburbCircle();
     }
-    updateSuburbCircle();
+    /* Postcode datasets often share one point for every locality in a PC
+     * (e.g. all of 2750 → Emu Plains). Refine from station centroids / geocode. */
+    refineSuburbCoords(row).then((refined) => {
+      if (!refined) return;
+      UserPrefs.update({
+        areaSuburb: row.suburb,
+        areaPostcode: row.postcode,
+        areaState: row.state,
+        areaLabel: row.label,
+        areaLat: refined.lat,
+        areaLng: refined.lng,
+      });
+      if (map) {
+        centerMapOnPrefs(
+          { areaLat: refined.lat, areaLng: refined.lng, areaRadiusKm: prefs().areaRadiusKm },
+          { zoom: 14 }
+        );
+        loadStationsInView();
+      }
+    });
+  }
+
+  async function refineSuburbCoords(row) {
+    if (!row || !row.suburb) return null;
+    const st = String(row.state || prefs().homeState || 'NSW').toUpperCase();
+    const want = String(row.suburb).trim().toUpperCase();
+    const pc = row.postcode ? String(row.postcode).padStart(4, '0') : '';
+    const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameMatches = (stationName, suburb, siblings) => {
+      const name = String(stationName || '').toUpperCase();
+      const sub = String(suburb || '').toUpperCase();
+      if (!sub || !name) return false;
+      if (!new RegExp('\\b' + escapeRe(sub).replace(/\s+/g, '\\s+') + '\\b').test(name)) return false;
+      for (const sib of siblings) {
+        const s = String(sib || '').toUpperCase();
+        if (!s || s === sub || s.length <= sub.length) continue;
+        if (new RegExp('\\b' + escapeRe(s).replace(/\s+/g, '\\s+') + '\\b').test(name)) return false;
+      }
+      return true;
+    };
+    try {
+      const catalog = await fetch(`${dataBase}/v1/stations/${st}/catalog.json`).then((r) => r.json());
+      const stations = Object.values(catalog.stations || catalog);
+      const siblings = suburbIndex
+        .filter((r) => r.state === st && (!pc || r.postcode === pc))
+        .map((r) => r.suburb.toUpperCase());
+      let n = 0;
+      let lat = 0;
+      let lng = 0;
+      for (const meta of stations) {
+        if (!meta || meta.lat == null || meta.lng == null) continue;
+        const metaSub = String(meta.suburb || '').trim().toUpperCase();
+        const match =
+          metaSub === want ||
+          nameMatches(meta.name, want, siblings) ||
+          (metaSub && nameMatches(metaSub, want, siblings));
+        if (!match) continue;
+        if (pc && meta.postcode != null && String(meta.postcode).padStart(4, '0') !== pc) continue;
+        const a = Number(meta.lat);
+        const b = Number(meta.lng);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        n += 1;
+        lat += a;
+        lng += b;
+      }
+      if (n > 0) return { lat: lat / n, lng: lng / n, source: 'stations', n };
+    } catch (_) {}
+    try {
+      const q = `${row.suburb}, ${row.postcode || ''}, ${st}, Australia`;
+      const url =
+        'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=au&q=' +
+        encodeURIComponent(q);
+      const arr = await fetch(url).then((r) => r.json());
+      if (arr && arr[0] && arr[0].lat != null && arr[0].lon != null) {
+        return { lat: Number(arr[0].lat), lng: Number(arr[0].lon), source: 'nominatim' };
+      }
+    } catch (_) {}
+    return null;
   }
 
   function updateSuburbCircle() {
     const p = prefs();
     if (suburbCircle) {
-      map.removeLayer(suburbCircle);
+      if (map) map.removeLayer(suburbCircle);
       suburbCircle = null;
     }
-    if (!map || p.areaLat == null || p.areaLng == null) return;
+    const c = suburbCoords(p);
+    if (!map || !c) return;
     const km = Number(document.getElementById('areaRadiusKm').value) || p.areaRadiusKm || 15;
-    suburbCircle = L.circle([p.areaLat, p.areaLng], {
+    suburbCircle = L.circle([c.lat, c.lng], {
       radius: km * 1000,
       color: '#3d9cf5',
       weight: 2,
@@ -276,11 +474,235 @@
     }).addTo(map);
   }
 
-  function initMap() {
+  function suburbCoords(p) {
+    if (!p) return null;
+    const lat = Number(p.areaLat);
+    const lng = Number(p.areaLng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    /* Australia bbox — reject garbage / missing coords */
+    if (lat < -45 || lat > -8 || lng < 110 || lng > 155) return null;
+    return { lat, lng };
+  }
+
+  /** Force suburb lat/lng to the geometric centre of the map container. */
+  function hardCenterMap(lat, lng, zoom) {
+    if (!map) return false;
+    const z = Math.max(13, zoom == null ? 14 : zoom);
+    const target = L.latLng(lat, lng);
+    /* pan:false — default pan:true shifts centre when container size was wrong */
+    map.invalidateSize({ animate: false, pan: false });
+    map.setView(target, z, { animate: false });
+    const size = map.getSize();
+    if (size.x > 0 && size.y > 0) {
+      const mid = map.containerPointToLatLng([size.x / 2, size.y / 2]);
+      const a = map.project(target, z);
+      const b = map.project(mid, z);
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        map.panBy([dx, dy], { animate: false });
+      }
+    }
+    return true;
+  }
+
+  function centerMapOnPrefs(p, opts) {
+    if (!map) return false;
+    const src = p || prefs();
+    const c = suburbCoords(src);
+    if (!c) return false;
+    const zoom = opts && opts.zoom != null ? opts.zoom : 14;
+    hardCenterMap(c.lat, c.lng, zoom);
+    updateSuburbCircle();
+    /* Re-apply after layout / webview chrome settles */
+    clearTimeout(centerMapOnPrefs._t);
+    centerMapOnPrefs._t = setTimeout(() => {
+      hardCenterMap(c.lat, c.lng, zoom);
+      updateSuburbCircle();
+    }, 100);
+    clearTimeout(centerMapOnPrefs._t2);
+    centerMapOnPrefs._t2 = setTimeout(() => {
+      hardCenterMap(c.lat, c.lng, zoom);
+      updateSuburbCircle();
+    }, 350);
+    return true;
+  }
+
+  function findSuburbForPrefs(p) {
+    if (!suburbIndex.length || !p) return null;
+    const postcode = p.areaPostcode ? String(p.areaPostcode).padStart(4, '0') : '';
+    const suburb = String(p.areaSuburb || '')
+      .trim()
+      .toLowerCase();
+    const state = String(p.areaState || p.homeState || '')
+      .trim()
+      .toUpperCase();
+    if (postcode && suburb) {
+      const hit = suburbIndex.find(
+        (r) =>
+          r.postcode === postcode &&
+          r.suburb.toLowerCase() === suburb &&
+          (!state || r.state === state)
+      );
+      if (hit) return hit;
+    }
+    const labelCandidates = [p.areaLabel, document.getElementById('suburbQuery')?.value]
+      .map((s) => String(s || '').trim().toLowerCase())
+      .filter(Boolean);
+    for (const label of labelCandidates) {
+      let hit = suburbIndex.find((r) => r.label.toLowerCase() === label);
+      if (hit) return hit;
+      hit = suburbIndex.find((r) => {
+        const s = r.suburb.toLowerCase();
+        return (
+          label === s ||
+          label === `${s} ${r.state.toLowerCase()}` ||
+          label === `${s} ${r.postcode}` ||
+          (label.startsWith(s + ' ') && (!state || r.state === state))
+        );
+      });
+      if (hit) return hit;
+    }
+    if (suburb && state) {
+      const hit = suburbIndex.find((r) => r.suburb.toLowerCase() === suburb && r.state === state);
+      if (hit) return hit;
+    }
+    /* Do not fall back to "first suburb in postcode" — multi-locality PCs
+     * share bad centroids and alphabet-first is often wrong (e.g. EMU HEIGHTS). */
+    return null;
+  }
+
+  function ensureSuburbCoords(p) {
+    const cur = p || prefs();
+    if (suburbCoords(cur)) return cur;
+    const hit = findSuburbForPrefs(cur);
+    if (!hit) return cur;
+    return UserPrefs.update({
+      areaSuburb: hit.suburb,
+      areaPostcode: hit.postcode,
+      areaState: hit.state,
+      areaLabel: hit.label,
+      areaLat: hit.lat,
+      areaLng: hit.lng,
+    });
+  }
+
+  function syncSuburbCoordsFromIndex(p) {
+    const cur = p || prefs();
+    const hit = findSuburbForPrefs(cur);
+    if (!hit || hit.lat == null || hit.lng == null) return cur;
+    const existing = suburbCoords(cur);
+    if (
+      existing &&
+      Math.hypot(existing.lat - Number(hit.lat), existing.lng - Number(hit.lng)) < 0.0005
+    ) {
+      return cur;
+    }
+    return UserPrefs.update({
+      areaSuburb: hit.suburb,
+      areaPostcode: hit.postcode,
+      areaState: hit.state,
+      areaLabel: hit.label,
+      areaLat: Number(hit.lat),
+      areaLng: Number(hit.lng),
+    });
+  }
+
+  async function refineSavedSuburbIfNeeded() {
     const p = prefs();
-    const lat = p.areaLat || -33.8688;
-    const lng = p.areaLng || 151.2093;
-    map = L.map('map').setView([lat, lng], 12);
+    if (!p.areaSuburb) return p;
+    /* Prefer authoritative index coords (G-NAF localities) when available */
+    const fromIndex = syncSuburbCoordsFromIndex(p);
+    if (fromIndex !== p && suburbCoords(fromIndex)) return fromIndex;
+    const refined = await refineSuburbCoords({
+      suburb: p.areaSuburb,
+      postcode: p.areaPostcode,
+      state: p.areaState || p.homeState,
+      lat: p.areaLat,
+      lng: p.areaLng,
+    });
+    if (!refined) return fromIndex;
+    const old = suburbCoords(fromIndex);
+    if (old && Math.hypot(old.lat - refined.lat, old.lng - refined.lng) < 0.001) {
+      return fromIndex;
+    }
+    return UserPrefs.update({
+      areaLat: refined.lat,
+      areaLng: refined.lng,
+    });
+  }
+
+  function parseAreaFromHash() {
+    const raw = String(location.hash || '').replace(/^#/, '');
+    if (!raw) return null;
+    try {
+      if (raw.charAt(0) === '{') return JSON.parse(decodeURIComponent(raw));
+    } catch (_) {}
+    const sp = new URLSearchParams(raw);
+    if (!sp.get('areaLat') && !sp.get('lat')) return null;
+    return {
+      areaLat: sp.get('areaLat') || sp.get('lat'),
+      areaLng: sp.get('areaLng') || sp.get('lng'),
+      areaLabel: sp.get('areaLabel') || sp.get('label') || '',
+      areaSuburb: sp.get('areaSuburb') || sp.get('suburb') || '',
+      areaPostcode: sp.get('areaPostcode') || sp.get('postcode') || '',
+      areaState: sp.get('areaState') || sp.get('state') || '',
+      areaRadiusKm: sp.get('areaRadiusKm') || sp.get('radius') || '',
+    };
+  }
+
+  function applyAreaFields(p, src) {
+    if (!src) return p;
+    const next = Object.assign({}, p);
+    const alat = src.areaLat != null && src.areaLat !== '' ? Number(src.areaLat) : NaN;
+    const alng = src.areaLng != null && src.areaLng !== '' ? Number(src.areaLng) : NaN;
+    if (Number.isFinite(alat) && Number.isFinite(alng)) {
+      next.areaLat = alat;
+      next.areaLng = alng;
+    }
+    if (src.areaLabel) next.areaLabel = String(src.areaLabel);
+    if (src.areaSuburb) next.areaSuburb = String(src.areaSuburb);
+    if (src.areaPostcode) next.areaPostcode = String(src.areaPostcode);
+    if (src.areaState) next.areaState = String(src.areaState);
+    const km = Number(src.areaRadiusKm);
+    if (Number.isFinite(km) && km >= 1 && km <= 100) next.areaRadiusKm = Math.round(km);
+    return next;
+  }
+
+  function applyAreaQueryParams(p) {
+    let next = applyAreaFields(p || prefs(), {
+      areaLat: params.get('areaLat'),
+      areaLng: params.get('areaLng'),
+      areaLabel: params.get('areaLabel'),
+      areaSuburb: params.get('areaSuburb'),
+      areaPostcode: params.get('areaPostcode'),
+      areaState: params.get('areaState'),
+      areaRadiusKm: params.get('areaRadiusKm'),
+    });
+    next = applyAreaFields(next, parseAreaFromHash());
+    return next;
+  }
+
+  function seedSuburbIndex() {
+    if (suburbIndex.length) return;
+    if (window.AFW_SUBURBS) suburbIndex = ingestSuburbs(window.AFW_SUBURBS);
+  }
+
+  function initMap(initialPrefs) {
+    const p = initialPrefs || prefs();
+    const c = suburbCoords(p);
+    const lat = c ? c.lat : -33.8688;
+    const lng = c ? c.lng : 151.2093;
+    const zoom = c ? 14 : 13;
+    const wantsSuburb = !!(c || p.areaLabel || p.areaSuburb || p.areaPostcode);
+    const el = document.getElementById('map');
+    if (map) {
+      map.remove();
+      map = null;
+      markerLayer = null;
+      suburbCircle = null;
+    }
+    map = L.map(el, { fadeAnimation: false, zoomAnimation: false }).setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap',
       maxZoom: 18,
@@ -290,27 +712,79 @@
       clearTimeout(initMap._t);
       initMap._t = setTimeout(loadStationsInView, 400);
     });
-    updateSuburbCircle();
+
+    const finishCenter = () => {
+      if (!map) return false;
+      const latest = ensureSuburbCoords(prefs());
+      if (centerMapOnPrefs(latest, { zoom: 14 })) {
+        loadStationsInView();
+        return true;
+      }
+      map.invalidateSize({ animate: false, pan: false });
+      return false;
+    };
+
+    map.whenReady(() => {
+      finishCenter();
+      setTimeout(finishCenter, 100);
+      setTimeout(finishCenter, 400);
+    });
+
+    if (!wantsSuburb && typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (suburbCoords(prefs()) || document.getElementById('suburbQuery')?.value?.trim()) return;
+          map.setView([pos.coords.latitude, pos.coords.longitude], 14, { animate: false });
+          loadStationsInView();
+        },
+        () => loadStationsInView(),
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 }
+      );
+    } else {
+      loadStationsInView();
+    }
   }
 
-  function rankColor(pct) {
-    const t = Math.max(0, Math.min(100, pct)) / 100;
-    const stops = [
-      [239, 68, 68],
-      [255, 255, 255],
-      [34, 197, 94],
-    ];
-    const i = t < 0.5 ? 0 : 1;
-    const u = t < 0.5 ? t * 2 : (t - 0.5) * 2;
-    const a = stops[i];
-    const b = stops[i + 1];
-    const rgb = a.map((c, j) => Math.round(c + (b[j] - c) * u));
-    return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  /** Green (cheap) -> red (dear); matches viewer. */
+  function priceHeatColor(t) {
+    const x = Math.max(0, Math.min(1, t));
+    const hue = 120 * (1 - x);
+    return `hsl(${hue}, 72%, 42%)`;
+  }
+
+  function stationMarkerIcon(stn, extent, active) {
+    const price = stn.price;
+    const showLoaded = price != null;
+    const isCheapest = showLoaded && extent && price === extent.min;
+    const state = showLoaded ? 'loaded' : 'pending';
+    const cheapest = isCheapest ? ' cheapest' : '';
+    const activeCls = active ? ' active' : '';
+    let heatStyle = '';
+    if (showLoaded && extent && !isCheapest) {
+      const t = extent.max === extent.min ? 0 : (price - extent.min) / (extent.max - extent.min);
+      heatStyle = ` style="--pin-heat:${priceHeatColor(t)}"`;
+    }
+    const priceLabel = showLoaded ? `${price.toFixed(1)}c` : '';
+    const logo = window.brandLogoFor ? brandLogoFor(stn.meta.brand) : '';
+    return L.divIcon({
+      className: 'station-div-icon',
+      html: `
+        <div class="station-marker ${state}${cheapest}${activeCls}" data-id="${escapeHtml(stn.id)}"${heatStyle}>
+          ${showLoaded ? `<span class="marker-price">${escapeHtml(priceLabel)}</span>` : ''}
+          <div class="marker-pin-wrap">
+            <div class="marker-pin-head">${logo ? `<img src="${logo}" alt="" />` : ''}</div>
+            <div class="marker-pin-tail"></div>
+          </div>
+        </div>
+      `,
+      iconSize: [52, 58],
+      iconAnchor: [26, 58],
+    });
   }
 
   async function loadStationsInView() {
     if (!map || map.getZoom() < 13) {
-      markerLayer.clearLayers();
+      if (markerLayer) markerLayer.clearLayers();
       return;
     }
     const p = readFormPrefs();
@@ -318,15 +792,20 @@
     const st = p.homeState || 'NSW';
     try {
       const catalog = await fetch(`${dataBase}/v1/stations/${st}/catalog.json`).then((r) => r.json());
-      const index = await fetch(`${dataBase}/v1/index.json`).then((r) => r.json()).catch(() => null);
-      let dayIso = null;
-      /* resolve latest day via listing not available — try today-ish from state file */
       const stateFile = await fetch(`${dataBase}/v1/${st}.json`).then((r) => r.json());
-      dayIso =
+      const dayIso =
         (stateFile.snapshot && stateFile.snapshot.asOf && String(stateFile.snapshot.asOf).slice(0, 10)) ||
         null;
       if (!dayIso) return;
       const day = await fetch(`${dataBase}/v1/stations/${st}/days/${dayIso}.json`).then((r) => r.json());
+      const priceById = {};
+      const rows = Array.isArray(day.s) ? day.s : [];
+      for (const row of rows) {
+        if (Array.isArray(row) && row.length >= 2) priceById[row[0]] = row[1];
+      }
+      if (day.prices && typeof day.prices === 'object') {
+        Object.assign(priceById, day.prices);
+      }
       const bounds = map.getBounds();
       const fuel = (p.preferredFuel || 'U91').replace(/\+.*/, '');
       const prices = [];
@@ -336,33 +815,18 @@
         if (!meta || meta.lat == null || meta.lng == null) continue;
         if (p.excludeCostco && /costco/i.test(meta.brand || '')) continue;
         if (!bounds.contains([meta.lat, meta.lng])) continue;
-        const pr = day.prices && day.prices[id] && day.prices[id][fuel];
+        const pr = priceById[id] && priceById[id][fuel];
         const price = pr != null ? Number(pr) / 10 : null;
         visible.push({ id, meta, price, state: st });
         if (price != null) prices.push(price);
       }
-      const min = prices.length ? Math.min(...prices) : 0;
-      const max = prices.length ? Math.max(...prices) : 1;
+      const extent = prices.length
+        ? { min: Math.min(...prices), max: Math.max(...prices) }
+        : null;
       markerLayer.clearLayers();
       for (const stn of visible) {
-        let heat = '#3d9cf5';
-        let cheapest = false;
-        if (stn.price != null && max > min) {
-          const pct =
-            stn.price <= min ? 100 : Math.max(0, Math.min(100, ((max - stn.price) / (max - min)) * 100));
-          heat = rankColor(pct);
-          cheapest = stn.price === min;
-        }
-        if (cheapest) heat = '#e8c547';
-        const logo = window.brandLogoFor ? brandLogoFor(stn.meta.brand) : '';
-        const icon = L.divIcon({
-          className: 'station-div-icon',
-          html: `<div class="station-marker" style="--pin-heat:${heat}"><div class="marker-pin-head">${
-            logo ? `<img src="${logo}" alt="" />` : ''
-          }</div></div>`,
-          iconSize: [28, 36],
-          iconAnchor: [14, 36],
-        });
+        const active = selectedStation && selectedStation.id === stn.id;
+        const icon = stationMarkerIcon(stn, extent, active);
         const m = L.marker([stn.meta.lat, stn.meta.lng], { icon });
         m.on('click', () => {
           selectedStation = {
@@ -375,6 +839,7 @@
           document.getElementById('popupName').textContent =
             `${selectedStation.name}${stn.price != null ? ' · ' + stn.price.toFixed(1) + 'c' : ''}`;
           document.getElementById('stationPopup').classList.remove('hidden');
+          loadStationsInView();
         });
         m.addTo(markerLayer);
         stationCache.set(stn.id, selectedStation);
@@ -384,8 +849,9 @@
     }
   }
 
-  function init() {
+  async function init() {
     fillScopeCombo();
+    seedSuburbIndex();
     let p = prefs();
     try {
       const injected = params.get('prefs');
@@ -393,15 +859,27 @@
         p = UserPrefs.save(JSON.parse(injected));
       }
     } catch (_) {}
+    /* Query + hash area* params (hash survives better in some Pebble webviews) */
+    p = UserPrefs.save(applyAreaQueryParams(p));
+    p = ensureSuburbCoords(p);
     applyPrefsToForm(p);
     updateCacheStatus();
-    initMap();
-    loadSuburbs();
+    /* Create map only after suburb coords are resolved */
+    initMap(p);
+    loadSuburbs().then(async (fixed) => {
+      if (fixed && map) centerMapOnPrefs(fixed, { zoom: 14 });
+      const refined = await refineSavedSuburbIfNeeded();
+      if (refined && map) {
+        centerMapOnPrefs(refined, { zoom: 14 });
+        loadStationsInView();
+      }
+    });
 
     document.getElementById('btnDownloadLatest').onclick = () => downloadLatest();
     document.getElementById('areaRadiusKm').onchange = () => {
       UserPrefs.update({ areaRadiusKm: Number(document.getElementById('areaRadiusKm').value) || 15 });
       updateSuburbCircle();
+      centerMapOnPrefs(prefs(), { zoom: 14 });
     };
     document.getElementById('suburbQuery').oninput = (ev) => {
       const box = document.getElementById('suburbSuggest');
@@ -424,6 +902,7 @@
       if (!selectedStation) return;
       UserPrefs.addFavourite(selectedStation);
       renderFavs();
+      renderDefault();
     };
     document.getElementById('btnSetDefault').onclick = () => {
       if (!selectedStation) return;
@@ -433,13 +912,14 @@
       renderDefault();
     };
     document.getElementById('btnClearDefault').onclick = () => {
-      const cur = prefs();
-      cur.defaultFavouriteId = null;
-      UserPrefs.save(cur);
+      UserPrefs.clearDefaultFavourite();
+      renderFavs();
       renderDefault();
     };
     document.getElementById('btnClosePopup').onclick = () => {
       document.getElementById('stationPopup').classList.add('hidden');
+      selectedStation = null;
+      loadStationsInView();
     };
     document.getElementById('btnSave').onclick = () => closeToWatch();
   }
