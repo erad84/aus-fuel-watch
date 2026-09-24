@@ -124,11 +124,15 @@ jobs:
             echo "skipping npm install (mode=${NPM_INSTALL})"
           fi
 
+          # Use bash -c (not -lc): a login shell resets PATH and drops
+          # /home/pebble/.local/bin where uv installs pebble-tool.
+          # --user + HOME=/tmp matches the image README for CI mounts.
           docker run --rm \
             -v "${PWD}:/pebble" \
+            --user "$(id -u):$(id -g)" \
             -e HOME=/tmp \
             "${DOCKER_IMAGE}" \
-            bash -lc "${build_cmd}"
+            bash -c "${build_cmd}"
 
       - name: Upload .pbw artifact
         uses: actions/upload-artifact@v4
