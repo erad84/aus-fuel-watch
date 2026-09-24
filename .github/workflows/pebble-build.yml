@@ -1,5 +1,6 @@
 # Thin caller: build Aus Fuel Watch on PR + push to main.
 # Reusable: erad84/pebble-ci @v1 (https://github.com/erad84/pebble-ci)
+# Optional CloudPebble install when PEBBLE_FIREBASE_REFRESH_TOKEN is set.
 
 name: pebble-build
 
@@ -20,3 +21,8 @@ jobs:
       artifact-name: aus-fuel-watch
       # package.json has no npm deps; auto skips install (same as local pebble build)
       npm-install: auto
+      # Install the .pbw to the watch via CloudPebble after a green build.
+      # Skips (build still succeeds) until PEBBLE_FIREBASE_REFRESH_TOKEN is set.
+      install-cloudpebble: true
+    # Pass caller-repo secrets into the reusable workflow (names must match).
+    secrets: inherit
