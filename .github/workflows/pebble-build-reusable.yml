@@ -1,0 +1,138 @@
+# Reusable Pebble SDK build via Docker.
+# Call from this repo or any of Mark's other Pebble repos:
+#   uses: erad84/aus-fuel-watch/.github/workflows/pebble-build-reusable.yml@main
+#
+# Image: ghcr.io/skylord123/docker-coredevices-pebble-tool (Core Devices pebble-tool + SDK).
+
+name: pebble-build-reusable
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Path to the Pebble project root (package.json / wscript)
+        type: string
+        required: false
+        default: '.'
+      artifact-name:
+        description: Name of the uploaded .pbw artifact
+        type: string
+        required: false
+        default: 'pebble-app'
+      platforms:
+        description: >
+          Optional comma-separated targetPlatforms override
+          (e.g. basalt,chalk). Empty keeps package.json as-is.
+        type: string
+        required: false
+        default: ''
+      pebble-command:
+        description: Shell command run inside the container (default pebble build)
+        type: string
+        required: false
+        default: 'pebble build'
+      docker-image:
+        description: Pebble SDK Docker image
+        type: string
+        required: false
+        default: 'ghcr.io/skylord123/docker-coredevices-pebble-tool:latest'
+      npm-install:
+        description: >
+          Install npm deps before build: auto (if package.json has
+          dependencies/devDependencies), true, or false.
+        type: string
+        required: false
+        default: 'auto'
+    outputs:
+      artifact-name:
+        description: Artifact name that was uploaded
+        value: ${{ jobs.build.outputs.artifact-name }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ inputs.artifact-name }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Optionally override targetPlatforms
+        if: inputs.platforms != ''
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          path = "package.json"
+          with open(path, encoding="utf-8") as f:
+              pkg = json.load(f)
+          platforms = [p.strip() for p in os.environ["PLATFORMS"].split(",") if p.strip()]
+          if not platforms:
+              raise SystemExit("platforms input produced an empty list")
+          pkg.setdefault("pebble", {})["targetPlatforms"] = platforms
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(pkg, f, indent=2)
+              f.write("\n")
+          print("targetPlatforms ->", platforms)
+          PY
+
+      - name: Build with Pebble Docker SDK
+        env:
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
+          PEBBLE_COMMAND: ${{ inputs.pebble-command }}
+          NPM_INSTALL: ${{ inputs.npm-install }}
+        run: |
+          set -euo pipefail
+
+          need_npm=0
+          case "${NPM_INSTALL}" in
+            true|yes|1) need_npm=1 ;;
+            false|no|0) need_npm=0 ;;
+            auto)
+              need_npm="$(python3 - <<'PY'
+          import json
+          pkg = json.load(open("package.json", encoding="utf-8"))
+          deps = dict(pkg.get("dependencies") or {})
+          deps.update(pkg.get("devDependencies") or {})
+          print(1 if deps else 0)
+          PY
+          )"
+              ;;
+            *)
+              echo "Unknown npm-install value: ${NPM_INSTALL}" >&2
+              exit 1
+              ;;
+          esac
+
+          build_cmd="${PEBBLE_COMMAND}"
+          if [ "${need_npm}" = "1" ]; then
+            if [ -f package-lock.json ]; then
+              build_cmd="npm ci && ${PEBBLE_COMMAND}"
+            else
+              build_cmd="npm install && ${PEBBLE_COMMAND}"
+            fi
+            echo "npm install enabled (mode=${NPM_INSTALL})"
+          else
+            echo "skipping npm install (mode=${NPM_INSTALL})"
+          fi
+
+          docker run --rm \
+            -v "${PWD}:/pebble" \
+            -e HOME=/tmp \
+            "${DOCKER_IMAGE}" \
+            bash -lc "${build_cmd}"
+
+      - name: Upload .pbw artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.working-directory }}/build/*.pbw
+          if-no-files-found: error

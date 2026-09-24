@@ -43,3 +43,13 @@ Scheduled times (UTC): 23:07, 02:37, 06:07 daily.
 
 The `heartbeat` workflow pushes a trivial commit monthly so scheduled workflows
 stay enabled past GitHub's 60-day inactivity cutoff.
+
+## 6. Pebble watchapp build
+
+`pebble-build.yml` builds the watchapp on pull requests and pushes to `main`
+using the reusable Docker workflow `pebble-build-reusable.yml` (Core Devices
+pebble-tool image). The `.pbw` is uploaded as a workflow artifact. No secrets
+are required. Other Pebble repos can call the reusable workflow — see the
+project doc `docs/pebble-ci.md` in the Aus Fuel Watch project store, or call:
+
+`erad84/aus-fuel-watch/.github/workflows/pebble-build-reusable.yml@main`

@@ -1,0 +1,22 @@
+# Thin caller: build Aus Fuel Watch on PR + push to main.
+# Reusable implementation: .github/workflows/pebble-build-reusable.yml
+
+name: pebble-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/pebble-build-reusable.yml
+    with:
+      working-directory: '.'
+      artifact-name: aus-fuel-watch
+      # package.json has no npm deps; auto skips install (same as local pebble build)
+      npm-install: auto
