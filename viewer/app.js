@@ -5046,8 +5046,14 @@ async function loadAllStates() {
   setStatus(`Loaded ${index.states.length} states · window ${index.windowDays} days · ${index.source?.slice(0, 80)}...`);
   applyUserPrefsToControls({ initial: !prefsAppliedOnce });
   prefsAppliedOnce = true;
+  await ensureSuburbIndex();
+  syncSelectedSuburbCoordsFromIndex();
   await refreshCharts();
   await maybeSelectDefaultFavourite();
+  /* Prefer suburb map centre on load when a suburb is saved */
+  if (selectedAreaCentre?.lat != null && selectedAreaCentre?.lng != null) {
+    await centerMapOnSelectedSuburb({ fetch: true, silent: true });
+  }
 }
 
 function initMap() {
@@ -5093,9 +5099,17 @@ function updateMapZoomHint() {
 
 function syncStationsSideHeight() {
   const side = document.querySelector('.stations-side');
-  if (!side) return;
-  // Favourites viewport is taller than the map; do not clip the side to map height.
-  side.style.height = '';
+  const mapBox = document.querySelector('.map-container');
+  if (!side || !mapBox) return;
+  if (window.matchMedia('(max-width: 900px)').matches) {
+    side.style.height = '';
+    side.style.maxHeight = '';
+    return;
+  }
+  const h = Math.round(mapBox.getBoundingClientRect().height);
+  if (h <= 0) return;
+  side.style.height = `${h}px`;
+  side.style.maxHeight = `${h}px`;
 }
 
 function syncMapToFuelGraphWidth() {
@@ -5111,11 +5125,13 @@ function syncMapToFuelGraphWidth() {
 
 function watchMapSize() {
   const chartWrap = document.querySelector('.panel-chart .chart-wrap');
-  if (!chartWrap || typeof ResizeObserver === 'undefined') return;
+  const mapBox = document.querySelector('.map-container');
+  if (typeof ResizeObserver === 'undefined') return;
   const ro = new ResizeObserver(() => {
     syncMapToFuelGraphWidth();
   });
-  ro.observe(chartWrap);
+  if (chartWrap) ro.observe(chartWrap);
+  if (mapBox) ro.observe(mapBox);
 }
 
 function scheduleStationFetch() {
@@ -6103,7 +6119,91 @@ function setSuburbCentreFromMatch(match, opts = {}) {
   };
   const input = document.getElementById('suburbSearch');
   if (input && input.value !== match.label) input.value = match.label;
+  if (match.state) {
+    const stateSel = document.getElementById('stateSelect');
+    if (stateSel && stateSel.value !== match.state) {
+      stateSel.value = match.state;
+      syncScopeDefaultFromFile();
+      syncWaWeeklyAfterLastVisibility();
+    }
+  }
   if (!opts.skipPersist) persistControlsToPrefs();
+  if (!opts.skipMap) {
+    centerMapOnSelectedSuburb({ fetch: opts.fetch !== false }).catch((e) =>
+      console.warn('Suburb map center:', e.message)
+    );
+  }
+}
+
+/** Centre the map on the selected suburb (G-NAF / index coords). */
+function hardCenterMapOnLatLng(lat, lng, zoom) {
+  initMap();
+  if (!map) return false;
+  const z = Math.max(MIN_ZOOM_STATIONS, zoom == null ? 14 : zoom);
+  const target = L.latLng(lat, lng);
+  map.invalidateSize({ animate: false, pan: false });
+  map.setView(target, z, { animate: false });
+  const size = map.getSize();
+  if (size.x > 0 && size.y > 0) {
+    const mid = map.containerPointToLatLng([size.x / 2, size.y / 2]);
+    const a = map.project(target, z);
+    const b = map.project(mid, z);
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+      map.panBy([dx, dy], { animate: false });
+    }
+  }
+  return true;
+}
+
+async function centerMapOnSelectedSuburb(opts = {}) {
+  const c = selectedAreaCentre;
+  if (!c || c.lat == null || c.lng == null) return false;
+  const lat = Number(c.lat);
+  const lng = Number(c.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  hardCenterMapOnLatLng(lat, lng, 14);
+  if (opts.fetch !== false) {
+    await fetchStationsAround(lat, lng, {
+      recenter: false,
+      lat,
+      lng,
+      silent: !!opts.silent,
+    });
+  }
+  return true;
+}
+
+/** Refresh saved suburb lat/lng from the G-NAF suburb index when names match. */
+function syncSelectedSuburbCoordsFromIndex() {
+  if (!selectedAreaCentre || !suburbIndex.length) return selectedAreaCentre;
+  const suburb = String(selectedAreaCentre.suburb || '').trim().toUpperCase();
+  const postcode = selectedAreaCentre.postcode
+    ? String(selectedAreaCentre.postcode).padStart(4, '0')
+    : '';
+  const state = String(selectedAreaCentre.state || '').toUpperCase();
+  let hit = null;
+  if (postcode && suburb) {
+    hit = suburbIndex.find(
+      (r) =>
+        r.postcode === postcode &&
+        r.suburb.toUpperCase() === suburb &&
+        (!state || r.state === state)
+    );
+  }
+  if (!hit && suburb) {
+    hit = suburbIndex.find(
+      (r) => r.suburb.toUpperCase() === suburb && (!state || r.state === state)
+    );
+  }
+  if (!hit) return selectedAreaCentre;
+  const moved =
+    Math.hypot(Number(selectedAreaCentre.lat) - hit.lat, Number(selectedAreaCentre.lng) - hit.lng) >
+    0.0005;
+  if (!moved && selectedAreaCentre.label === hit.label) return selectedAreaCentre;
+  setSuburbCentreFromMatch(hit, { skipPersist: !moved, skipMap: true });
+  return selectedAreaCentre;
 }
 
 function suburbComboEl() {

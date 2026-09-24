@@ -3,6 +3,7 @@
 static void prv_init(void) {
   afw_theme_init();
   afw_state_init();
+  afw_touch_init();
   afw_comm_init();
   afw_ui_init();
   afw_comm_request("refresh");

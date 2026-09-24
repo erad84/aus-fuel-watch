@@ -14,7 +14,10 @@
     "targetPlatforms": [
       "basalt",
       "chalk",
-      "aplite"
+      "aplite",
+      "diorite",
+      "emery",
+      "gabbro"
     ],
     "watchapp": {
       "watchface": false
@@ -37,6 +40,8 @@
       "COMPARE_LINE",
       "AS_OF",
       "STALE",
+      "OUTLOOK_DIR",
+      "OUTLOOK_STR",
       "GRAPH_KIND",
       "GRAPH_MIN",
       "GRAPH_MAX",
@@ -47,7 +52,16 @@
       "REQUEST",
       "PREFS_JSON",
       "STATUS",
-      "THEME"
+      "THEME",
+      "GRAPH_TITLE",
+      "GRAPH_X0",
+      "GRAPH_X1",
+      "GRAPH_N2",
+      "GRAPH_PTS2",
+      "GRAPH_LEGEND0",
+      "GRAPH_LEGEND1",
+      "LIST_TITLE",
+      "BEST_LINE"
     ],
     "resources": {
       "media": [
