@@ -5966,8 +5966,8 @@ function ingestSuburbPayload(data) {
 async function ensureSuburbIndex() {
   if (suburbIndexLoaded && suburbIndex.length) return suburbIndex;
 
-  // Prefer live JSON over the embed (same Pages-first idea; suburbs live next to
-  // the viewer today, with optional v1/ publish later).
+  // Prefer Pages `{dataBase}/v1/au-suburbs.json` (source of truth); viewer/ and
+  // AFW_SUBURBS embed are offline / file:// fallback only.
   const tryIngest = (data, label) => {
     ingestSuburbPayload(data);
     if (suburbIndex.length) return true;
