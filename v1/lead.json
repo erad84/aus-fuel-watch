@@ -3160,7 +3160,7 @@
     }
   ],
   "lastFetch": {
-    "at": "2026-09-29T00:16:48.144Z",
+    "at": "2026-09-29T01:05:08.003Z",
     "liveIso": "2026-09-29",
     "mogas95Usd": 118.469,
     "gasoilUsd": 178.04,
@@ -3168,5 +3168,5 @@
     "mogasCmeDays": 12,
     "gasoilCmeDays": 12
   },
-  "lagCalibUpdated": "2026-09-29T00:16:48.317Z"
+  "lagCalibUpdated": "2026-09-29T01:05:08.140Z"
 }
