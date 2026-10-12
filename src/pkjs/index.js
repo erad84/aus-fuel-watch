@@ -211,13 +211,50 @@ function fetchCached(path, force) {
   });
 }
 
-/** Best timestamp for "data as of": prefer pipeline generated time over date-only snapshot.asOf. */
-function resolveDataAsOf(stateFile) {
+/**
+ * Last calendar day with a published mean in the rolling series (any common scope/fuel).
+ * Prefer this over snapshot.asOf — scope snapshots can freeze while series keep rolling.
+ */
+function latestSeriesDayIso(stateFile) {
+  if (!stateFile || !stateFile.start) return null;
+  var aligned = seriesMeansAligned(stateFile, 'metro', 'U91');
+  if (!aligned.length) aligned = seriesMeansAligned(stateFile, 'state', 'U91');
+  if (!aligned.length) aligned = seriesMeansAligned(stateFile, 'regional', 'U91');
+  var last = -1;
+  for (var i = 0; i < aligned.length; i++) {
+    if (aligned[i] != null) last = i;
+  }
+  if (last < 0) return parseIsoDate(stateFile.start) ? parseIsoDate(stateFile.start).iso : null;
+  return dayIndexIso(stateFile.start, last);
+}
+
+/** True when embedded scope snapshot matches (or is not older than) the series tip. */
+function snapshotBoardFresh(stateFile) {
+  var snap = stateFile && stateFile.snapshot && stateFile.snapshot.asOf;
+  var snapDay = parseIsoDate(snap);
+  if (!snapDay) return false;
+  var seriesDay = latestSeriesDayIso(stateFile);
+  if (!seriesDay) return true;
+  return snapDay.iso >= seriesDay;
+}
+
+/**
+ * Label for watch AS_OF: must match the price board vintage.
+ * Pipeline `generated` alone can say "today" while snapshot/day board is weeks old.
+ */
+function resolveDataAsOf(stateFile, priceDayIso) {
   if (!stateFile) return '';
   var gen = stateFile.generated || stateFile.updated || '';
+  var priceDay =
+    (priceDayIso && parseIsoDate(priceDayIso) && parseIsoDate(priceDayIso).iso) ||
+    latestDayIso(stateFile) ||
+    '';
+  if (priceDay && gen && String(gen).length > 10) {
+    var genDay = parseIsoDate(gen);
+    if (genDay && genDay.iso > priceDay) return priceDay;
+  }
   if (gen && String(gen).length > 10) return String(gen);
-  var snap = stateFile.snapshot && stateFile.snapshot.asOf;
-  return String(snap || gen || '');
+  return String(priceDay || (stateFile.snapshot && stateFile.snapshot.asOf) || gen || '');
 }
 
 function isCostcoBrand(brand) {
@@ -528,22 +565,25 @@ function bestBuyFields(prefs, stateFile) {
   var scope = prefs.defaultScope || 'metro';
   var fuelPref = prefs.preferredFuel || 'U91';
   var fuel = primaryFuel(prefs);
-  var compareLine = '';
+  /* Stale embedded snapshot must not paint Best Buy when day board failed to load. */
+  var useSnap = snapshotBoardFresh(stateFile);
 
   if (fuelPref === 'U91+E10' || fuelPref === 'U91+LPG') {
     var key = fuelPref === 'U91+E10' ? 'e10VsU91' : 'lpgVsU91';
-    var c = snapshotCompare(stateFile, scope, key);
+    var c = useSnap ? snapshotCompare(stateFile, scope, key) : null;
     var pick = c && c.pick ? c.pick : 'tie';
     var win = c && c.winPct != null ? Math.round(Number(c.winPct) * 10) / 10 : 0;
     /* Alt or U91 win: "E10 2.3%" / "U91 2.3%" — % drawn non-bold on watch */
     var bestLine = '';
-    if (pick === 'tie') {
+    if (!useSnap) {
+      bestLine = fuel;
+    } else if (pick === 'tie') {
       bestLine = 'Even (energy-adj)';
     } else if (pick) {
       bestLine = pick + ' ' + win.toFixed(1) + '%';
     }
     var nameFuel = pick === 'tie' || !pick ? 'U91' : pick;
-    var cheapDual = snapshotCheapest(stateFile, scope, nameFuel);
+    var cheapDual = useSnap ? snapshotCheapest(stateFile, scope, nameFuel) : null;
     if (prefs.excludeCostco && cheapDual && isCostcoBrand(cheapDual.brand)) {
       cheapDual = snapshotCheapest(stateFile, scope, 'U91');
       if (prefs.excludeCostco && cheapDual && isCostcoBrand(cheapDual.brand)) cheapDual = null;
@@ -559,7 +599,7 @@ function bestBuyFields(prefs, stateFile) {
     };
   }
 
-  var cheap = snapshotCheapest(stateFile, scope, fuel);
+  var cheap = useSnap ? snapshotCheapest(stateFile, scope, fuel) : null;
   if (prefs.excludeCostco && cheap && isCostcoBrand(cheap.brand)) {
     cheap = null;
   }
@@ -660,25 +700,16 @@ function dayIndexIso(startIso, index) {
   return addDaysIso(startIso, index);
 }
 
+/**
+ * Day file to load for Best Buy / top5.
+ * Prefer rolling series tip; only trust snapshot.asOf when it is not behind the series.
+ */
 function latestDayIso(stateFile) {
-  var asOf = stateFile && stateFile.snapshot && stateFile.snapshot.asOf;
-  if (asOf) {
-    var p = parseIsoDate(asOf);
-    if (p) return p.iso;
-  }
-  var start = stateFile && stateFile.start;
-  if (!start) return null;
-  var scope = 'metro';
-  var aligned = seriesMeansAligned(stateFile, scope, 'U91');
-  if (!aligned.length) {
-    aligned = seriesMeansAligned(stateFile, 'state', 'U91');
-  }
-  var last = -1;
-  for (var i = 0; i < aligned.length; i++) {
-    if (aligned[i] != null) last = i;
-  }
-  if (last < 0) return parseIsoDate(start) ? parseIsoDate(start).iso : null;
-  return dayIndexIso(start, last);
+  var seriesDay = latestSeriesDayIso(stateFile);
+  var snap = stateFile && stateFile.snapshot && stateFile.snapshot.asOf;
+  var snapDay = parseIsoDate(snap);
+  if (snapDay && (!seriesDay || snapDay.iso >= seriesDay)) return snapDay.iso;
+  return seriesDay;
 }
 
 /** Day file → { id: {U91:tenths,...} } */
@@ -821,7 +852,8 @@ function buildMainPayload(prefs, stateFile, outlook, stationOverride) {
     }
   }
 
-  var asOfRaw = resolveDataAsOf(stateFile);
+  var priceDay = latestDayIso(stateFile);
+  var asOfRaw = resolveDataAsOf(stateFile, priceDay);
   var asOf = formatAsOfLocal(asOfRaw) || String(asOfRaw).substring(0, 23);
   var glow = outlookSignal(outlook, fuel);
 
@@ -1264,7 +1296,8 @@ function onReady() {
   Pebble.addEventListener('appmessage', function (e) {
     var req = e.payload && e.payload.REQUEST;
     if (!req) return;
-    if (req === 'refresh') pushMain(false);
+    /* Force re-fetch: select/refresh must not serve the 3h phone cache. */
+    if (req === 'refresh') pushMain(true);
     else if (req === 'graph' || req === 'graph_state' || req === 'graph_station') requestGraph();
     else if (req === 'list_favs') pushList('favs');
     else if (req === 'list_suburb') pushList('suburb');
@@ -1307,5 +1340,8 @@ if (typeof module !== 'undefined') {
     scopeTitle: scopeTitle,
     dayPriceMap: dayPriceMap,
     latestDayIso: latestDayIso,
+    latestSeriesDayIso: latestSeriesDayIso,
+    snapshotBoardFresh: snapshotBoardFresh,
+    resolveDataAsOf: resolveDataAsOf,
   };
 }
