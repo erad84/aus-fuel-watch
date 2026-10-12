@@ -160,6 +160,38 @@
     return `${day} ${mon} ${hh}:${mm}`;
   }
 
+  /** Same tip rule as pkjs latestDayIso: series end wins over frozen snapshot.asOf. */
+  function latestPublishedDayIso(stateFile) {
+    if (!stateFile) return null;
+    const start = stateFile.start;
+    let seriesDay = null;
+    if (start) {
+      const avg =
+        stateFile.scopes?.metro?.U91?.avg ||
+        stateFile.scopes?.state?.U91?.avg ||
+        stateFile.fuels?.U91?.avg ||
+        [];
+      let last = -1;
+      for (let i = 0; i < avg.length; i++) {
+        if (avg[i] != null) last = i;
+      }
+      if (last >= 0) {
+        const t = Date.parse(String(start).slice(0, 10) + 'T00:00:00Z');
+        if (Number.isFinite(t)) {
+          seriesDay = new Date(t + last * 86400000).toISOString().slice(0, 10);
+        }
+      }
+    }
+    const snap =
+      stateFile.snapshot && stateFile.snapshot.asOf
+        ? String(stateFile.snapshot.asOf).slice(0, 10)
+        : null;
+    if (snap && /^\d{4}-\d{2}-\d{2}$/.test(snap) && (!seriesDay || snap >= seriesDay)) {
+      return snap;
+    }
+    return seriesDay;
+  }
+
   function updateCacheStatus() {
     const el = document.getElementById('cacheStatus');
     const p = readFormPrefs();
@@ -793,9 +825,8 @@
     try {
       const catalog = await fetch(`${dataBase}/v1/stations/${st}/catalog.json`).then((r) => r.json());
       const stateFile = await fetch(`${dataBase}/v1/${st}.json`).then((r) => r.json());
-      const dayIso =
-        (stateFile.snapshot && stateFile.snapshot.asOf && String(stateFile.snapshot.asOf).slice(0, 10)) ||
-        null;
+      /* Prefer series tip over frozen snapshot.asOf (same rule as pkjs latestDayIso). */
+      const dayIso = latestPublishedDayIso(stateFile);
       if (!dayIso) return;
       const day = await fetch(`${dataBase}/v1/stations/${st}/days/${dayIso}.json`).then((r) => r.json());
       const priceById = {};

@@ -84,6 +84,49 @@ assert.strictEqual(
   'NSW'
 );
 assert.strictEqual(mod.dayPriceMap({ s: [['id1', { U91: 2075 }]] }).id1.U91, 2075);
+
+/* Stale snapshot.asOf must not beat a newer series tip (live Pages shape). */
+var staleSnapState = {
+  generated: '2026-10-12T19:29:53.752Z',
+  snapshot: { asOf: '2026-09-16' },
+  start: '2026-07-16',
+  scopes: {
+    metro: {
+      U91: {
+        avg: (function () {
+          var a = new Array(90).fill(null);
+          a[89] = 2420;
+          return a;
+        })(),
+      },
+    },
+  },
+};
+assert.strictEqual(mod.latestSeriesDayIso(staleSnapState), '2026-10-13');
+assert.strictEqual(mod.latestDayIso(staleSnapState), '2026-10-13');
+assert.strictEqual(mod.snapshotBoardFresh(staleSnapState), false);
+/* generated is OK when it is not ahead of the price board day */
+assert.strictEqual(mod.resolveDataAsOf(staleSnapState), '2026-10-12T19:29:53.752Z');
+/* generated ahead of board day → show the board day (honesty) */
+assert.strictEqual(
+  mod.resolveDataAsOf(
+    { generated: '2026-10-12T19:29:53.752Z', snapshot: { asOf: '2026-09-16' } },
+    '2026-09-16'
+  ),
+  '2026-09-16'
+);
+
+/* Fresh snapshot still wins when it matches the tip. */
+assert.strictEqual(
+  mod.latestDayIso({
+    snapshot: { asOf: '2026-10-13' },
+    start: '2026-07-16',
+    scopes: { metro: { U91: { avg: new Array(90).fill(2000) } } },
+  }),
+  '2026-10-13'
+);
+
+/* No series: fall back to snapshot.asOf */
 assert.strictEqual(
   mod.latestDayIso({ snapshot: { asOf: '2026-09-16T10:00:00Z' }, start: '2026-06-19' }),
   '2026-09-16'
