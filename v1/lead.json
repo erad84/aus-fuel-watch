@@ -1,6 +1,6 @@
 {
   "source": "NYMEX Singapore Mogas 95 / Gasoil (Platts) delayed settles; history reshaped from AIP weekly + Brent; FX Yahoo AUDUSD",
-  "updated": "2026-10-13",
+  "updated": "2026-10-14",
   "symbols": {
     "mogas95": "NYMEX:AV01!",
     "gasoil": "NYMEX:SGB1!"
@@ -10,14 +10,14 @@
     "min": 5,
     "max": 21,
     "byState": {
-      "NSW": 10,
+      "NSW": 11,
       "VIC": 11,
       "QLD": 10,
       "WA": 9,
       "SA": 10,
       "TAS": 12,
       "NT": 12,
-      "ACT": 9
+      "ACT": 11
     }
   },
   "days": [
@@ -3272,21 +3272,21 @@
       "date": "2026-10-11",
       "mogas95": 135.9,
       "mogas95Source": "brent_extend",
-      "mogas95Usd": 150.358,
+      "mogas95Usd": 150.925,
       "gasoil": 153.6,
       "gasoilSource": "brent_extend",
-      "gasoilUsd": 169.942,
-      "fxAudUsd": 0.6959
+      "gasoilUsd": 170.581,
+      "fxAudUsd": 0.69852
     },
     {
       "date": "2026-10-12",
       "mogas95": 138.4,
       "mogas95Source": "brent_extend",
-      "mogas95Usd": 153.124,
+      "mogas95Usd": 153.061,
       "gasoil": 156.4,
       "gasoilSource": "brent_extend",
-      "gasoilUsd": 173.039,
-      "fxAudUsd": 0.6959
+      "gasoilUsd": 172.967,
+      "fxAudUsd": 0.69561
     },
     {
       "date": "2026-10-13",
@@ -3296,17 +3296,27 @@
       "gasoil": 155.1,
       "gasoilSource": "cme",
       "gasoilUsd": 171.652,
-      "fxAudUsd": 0.696185
+      "fxAudUsd": 0.69561
+    },
+    {
+      "date": "2026-10-14",
+      "mogas95": 106.6,
+      "mogas95Source": "cme",
+      "mogas95Usd": 118.469,
+      "gasoil": 157,
+      "gasoilSource": "cme",
+      "gasoilUsd": 174.424,
+      "fxAudUsd": 0.698812
     }
   ],
   "lastFetch": {
-    "at": "2026-10-13T02:38:34.581Z",
-    "liveIso": "2026-10-13",
+    "at": "2026-10-14T00:25:09.776Z",
+    "liveIso": "2026-10-14",
     "mogas95Usd": 118.469,
-    "gasoilUsd": 171.652,
-    "dayCount": 355,
-    "mogasCmeDays": 21,
-    "gasoilCmeDays": 21
+    "gasoilUsd": 174.424,
+    "dayCount": 356,
+    "mogasCmeDays": 22,
+    "gasoilCmeDays": 22
   },
-  "lagCalibUpdated": "2026-10-13T02:38:34.747Z"
+  "lagCalibUpdated": "2026-10-14T00:25:09.935Z"
 }
