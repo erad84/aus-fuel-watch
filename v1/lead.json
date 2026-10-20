@@ -17,7 +17,7 @@
       "SA": 10,
       "TAS": 12,
       "NT": 13,
-      "ACT": 11
+      "ACT": 13
     }
   },
   "days": [
@@ -3356,27 +3356,27 @@
       "gasoil": 155.3,
       "gasoilSource": "cme",
       "gasoilUsd": 172.457,
-      "fxAudUsd": 0.69721
+      "fxAudUsd": 0.69828
     },
     {
       "date": "2026-10-20",
-      "mogas95": 106.8,
+      "mogas95": 106.3,
       "mogas95Source": "cme",
       "mogas95Usd": 118.469,
-      "gasoil": 155.4,
+      "gasoil": 155.5,
       "gasoilSource": "cme",
-      "gasoilUsd": 172.457,
-      "fxAudUsd": 0.698032
+      "gasoilUsd": 173.275,
+      "fxAudUsd": 0.700869
     }
   ],
   "lastFetch": {
-    "at": "2026-10-20T00:28:25.899Z",
+    "at": "2026-10-20T23:59:29.302Z",
     "liveIso": "2026-10-20",
     "mogas95Usd": 118.469,
-    "gasoilUsd": 172.457,
+    "gasoilUsd": 173.275,
     "dayCount": 362,
     "mogasCmeDays": 26,
     "gasoilCmeDays": 26
   },
-  "lagCalibUpdated": "2026-10-20T00:28:26.076Z"
+  "lagCalibUpdated": "2026-10-20T23:59:29.480Z"
 }

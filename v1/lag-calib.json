@@ -28,7 +28,7 @@
       "SA": 10,
       "TAS": 12,
       "NT": 13,
-      "ACT": 11
+      "ACT": 13
     }
   },
   "byState": {
@@ -36,8 +36,8 @@
       "metro": {
         "U91": {
           "lag": 10,
-          "corr": 0.578,
-          "n": 43,
+          "corr": 0.547,
+          "n": 42,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -46,13 +46,13 @@
             "corr": 0.637,
             "n": 13
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         },
         "E10": {
           "lag": 10,
-          "corr": 0.583,
-          "n": 43,
+          "corr": 0.553,
+          "n": 42,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -61,28 +61,28 @@
             "corr": 0.637,
             "n": 13
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         },
         "P95": {
-          "lag": 10,
-          "corr": 0.583,
+          "lag": 8,
+          "corr": 0.559,
           "n": 45,
           "soft": false,
-          "source": "merged",
+          "source": "daily",
           "leadKey": "mogas95",
           "turns": {
             "lag": 12,
             "corr": 0.637,
             "n": 13
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         },
         "P98": {
           "lag": 10,
-          "corr": 0.606,
-          "n": 45,
+          "corr": 0.581,
+          "n": 44,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -91,12 +91,12 @@
             "corr": 0.637,
             "n": 13
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         },
         "DSL": {
-          "lag": 6,
-          "corr": 0.806,
+          "lag": 5,
+          "corr": 0.812,
           "n": 46,
           "soft": false,
           "source": "merged",
@@ -106,12 +106,12 @@
             "corr": 0.908,
             "n": 14
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         },
         "PDSL": {
-          "lag": 6,
-          "corr": 0.78,
+          "lag": 5,
+          "corr": 0.785,
           "n": 46,
           "soft": false,
           "source": "merged",
@@ -121,15 +121,15 @@
             "corr": 0.798,
             "n": 14
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         }
       },
       "state": {
         "U91": {
           "lag": 12,
-          "corr": 0.58,
-          "n": 37,
+          "corr": 0.544,
+          "n": 36,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -138,13 +138,13 @@
             "corr": 0.566,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "E10": {
           "lag": 10,
-          "corr": 0.58,
-          "n": 41,
+          "corr": 0.547,
+          "n": 40,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -153,13 +153,13 @@
             "corr": 0.582,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "P95": {
           "lag": 9,
-          "corr": 0.545,
-          "n": 43,
+          "corr": 0.513,
+          "n": 42,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -168,13 +168,13 @@
             "corr": 0.565,
             "n": 14
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "P98": {
           "lag": 9,
-          "corr": 0.568,
-          "n": 41,
+          "corr": 0.535,
+          "n": 40,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -183,12 +183,12 @@
             "corr": 0.56,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "DSL": {
-          "lag": 6,
-          "corr": 0.783,
+          "lag": 5,
+          "corr": 0.778,
           "n": 44,
           "soft": false,
           "source": "merged",
@@ -198,12 +198,12 @@
             "corr": 0.943,
             "n": 14
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "PDSL": {
           "lag": 6,
-          "corr": 0.738,
+          "corr": 0.745,
           "n": 44,
           "soft": false,
           "source": "merged",
@@ -213,15 +213,15 @@
             "corr": 0.811,
             "n": 14
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         }
       },
       "regional": {
         "U91": {
           "lag": 12,
-          "corr": 0.611,
-          "n": 37,
+          "corr": 0.572,
+          "n": 36,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -230,13 +230,13 @@
             "corr": 0.643,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "E10": {
           "lag": 11,
-          "corr": 0.601,
-          "n": 37,
+          "corr": 0.567,
+          "n": 36,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -245,13 +245,13 @@
             "corr": 0.637,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "P95": {
           "lag": 12,
-          "corr": 0.605,
-          "n": 37,
+          "corr": 0.564,
+          "n": 36,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -260,13 +260,13 @@
             "corr": 0.593,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "P98": {
           "lag": 12,
-          "corr": 0.622,
-          "n": 37,
+          "corr": 0.589,
+          "n": 36,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -275,13 +275,13 @@
             "corr": 0.632,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "DSL": {
           "lag": 6,
-          "corr": 0.789,
-          "n": 44,
+          "corr": 0.78,
+          "n": 42,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -290,12 +290,12 @@
             "corr": 0.947,
             "n": 14
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "PDSL": {
           "lag": 6,
-          "corr": 0.771,
+          "corr": 0.773,
           "n": 44,
           "soft": false,
           "source": "merged",
@@ -305,7 +305,7 @@
             "corr": 0.842,
             "n": 14
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         }
       }
@@ -315,8 +315,8 @@
       "metro": {
         "U91": {
           "lag": 12,
-          "corr": 0.619,
-          "n": 38,
+          "corr": 0.587,
+          "n": 37,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -325,13 +325,13 @@
             "corr": 0.599,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "E10": {
           "lag": 12,
-          "corr": 0.636,
-          "n": 38,
+          "corr": 0.606,
+          "n": 37,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -340,12 +340,12 @@
             "corr": 0.632,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "P95": {
           "lag": 11,
-          "corr": 0.608,
+          "corr": 0.576,
           "n": 38,
           "soft": false,
           "source": "merged",
@@ -355,13 +355,13 @@
             "corr": 0.582,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "P98": {
           "lag": 10,
-          "corr": 0.582,
-          "n": 44,
+          "corr": 0.556,
+          "n": 43,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -370,13 +370,13 @@
             "corr": 0.582,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "DSL": {
           "lag": 6,
-          "corr": 0.823,
-          "n": 46,
+          "corr": 0.838,
+          "n": 45,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -385,13 +385,13 @@
             "corr": 0.947,
             "n": 14
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "PDSL": {
           "lag": 5,
-          "corr": 0.77,
-          "n": 44,
+          "corr": 0.78,
+          "n": 45,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -400,15 +400,15 @@
             "corr": 0.815,
             "n": 14
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         }
       },
       "state": {
         "U91": {
           "lag": 12,
-          "corr": 0.518,
-          "n": 36,
+          "corr": 0.476,
+          "n": 35,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -417,13 +417,13 @@
             "corr": 0.571,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "E10": {
           "lag": 10,
-          "corr": 0.591,
-          "n": 37,
+          "corr": 0.556,
+          "n": 36,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -432,13 +432,13 @@
             "corr": 0.615,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "P95": {
           "lag": 10,
-          "corr": 0.533,
-          "n": 37,
+          "corr": 0.493,
+          "n": 36,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -447,13 +447,13 @@
             "corr": 0.582,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "P98": {
           "lag": 9,
-          "corr": 0.525,
-          "n": 38,
+          "corr": 0.485,
+          "n": 37,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -462,13 +462,13 @@
             "corr": 0.571,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "DSL": {
           "lag": 5,
-          "corr": 0.746,
-          "n": 44,
+          "corr": 0.764,
+          "n": 43,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -477,13 +477,13 @@
             "corr": 0.908,
             "n": 14
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "PDSL": {
           "lag": 6,
-          "corr": 0.735,
-          "n": 42,
+          "corr": 0.742,
+          "n": 41,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -492,15 +492,15 @@
             "corr": 0.855,
             "n": 14
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         }
       },
       "regional": {
         "U91": {
           "lag": 12,
-          "corr": 0.48,
-          "n": 36,
+          "corr": 0.434,
+          "n": 35,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -509,13 +509,13 @@
             "corr": 0.538,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "E10": {
           "lag": 12,
-          "corr": 0.583,
-          "n": 36,
+          "corr": 0.54,
+          "n": 35,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -524,13 +524,13 @@
             "corr": 0.654,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "P95": {
           "lag": 12,
-          "corr": 0.546,
-          "n": 36,
+          "corr": 0.509,
+          "n": 35,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -539,28 +539,28 @@
             "corr": 0.604,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "P98": {
-          "lag": 11,
-          "corr": 0.558,
-          "n": 36,
+          "lag": 13,
+          "corr": 0.563,
+          "n": 34,
           "soft": false,
-          "source": "daily",
+          "source": "merged",
           "leadKey": "mogas95",
           "turns": {
             "lag": 15,
             "corr": 0.703,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "DSL": {
           "lag": 5,
-          "corr": 0.731,
-          "n": 42,
+          "corr": 0.742,
+          "n": 43,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -569,13 +569,13 @@
             "corr": 0.895,
             "n": 14
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "PDSL": {
           "lag": 6,
-          "corr": 0.748,
-          "n": 42,
+          "corr": 0.756,
+          "n": 41,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -584,7 +584,7 @@
             "corr": 0.886,
             "n": 14
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         }
       }
@@ -594,8 +594,8 @@
       "metro": {
         "U91": {
           "lag": 8,
-          "corr": 0.633,
-          "n": 47,
+          "corr": 0.613,
+          "n": 46,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -604,13 +604,13 @@
             "corr": 0.698,
             "n": 17
           },
-          "pairs": 90,
+          "pairs": 89,
           "days": 90
         },
         "P95": {
           "lag": 8,
-          "corr": 0.652,
-          "n": 45,
+          "corr": 0.63,
+          "n": 46,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -619,13 +619,13 @@
             "corr": 0.71,
             "n": 17
           },
-          "pairs": 90,
+          "pairs": 89,
           "days": 90
         },
         "P98": {
           "lag": 8,
-          "corr": 0.645,
-          "n": 47,
+          "corr": 0.625,
+          "n": 46,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -634,12 +634,12 @@
             "corr": 0.71,
             "n": 17
           },
-          "pairs": 90,
+          "pairs": 89,
           "days": 90
         },
         "DSL": {
-          "lag": 6,
-          "corr": 0.833,
+          "lag": 5,
+          "corr": 0.844,
           "n": 45,
           "soft": false,
           "source": "merged",
@@ -649,12 +649,12 @@
             "corr": 0.721,
             "n": 16
           },
-          "pairs": 90,
+          "pairs": 89,
           "days": 90
         },
         "PDSL": {
-          "lag": 6,
-          "corr": 0.833,
+          "lag": 5,
+          "corr": 0.838,
           "n": 45,
           "soft": false,
           "source": "merged",
@@ -664,15 +664,15 @@
             "corr": 0.647,
             "n": 16
           },
-          "pairs": 90,
+          "pairs": 89,
           "days": 90
         }
       },
       "state": {
         "U91": {
           "lag": 8,
-          "corr": 0.541,
-          "n": 44,
+          "corr": 0.508,
+          "n": 43,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -681,13 +681,13 @@
             "corr": 0.714,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "P95": {
           "lag": 8,
-          "corr": 0.599,
-          "n": 44,
+          "corr": 0.571,
+          "n": 43,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -696,13 +696,13 @@
             "corr": 0.688,
             "n": 15
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "P98": {
           "lag": 9,
-          "corr": 0.587,
-          "n": 44,
+          "corr": 0.558,
+          "n": 43,
           "soft": false,
           "source": "merged",
           "leadKey": "mogas95",
@@ -711,13 +711,13 @@
             "corr": 0.703,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "DSL": {
           "lag": 7,
-          "corr": 0.84,
-          "n": 44,
+          "corr": 0.865,
+          "n": 43,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -726,13 +726,13 @@
             "corr": 0.934,
             "n": 14
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "PDSL": {
           "lag": 5,
-          "corr": 0.807,
-          "n": 45,
+          "corr": 0.82,
+          "n": 44,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -741,15 +741,15 @@
             "corr": 0.758,
             "n": 14
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         }
       },
       "regional": {
         "U91": {
           "lag": 9,
-          "corr": 0.468,
-          "n": 43,
+          "corr": 0.431,
+          "n": 42,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -758,13 +758,13 @@
             "corr": 0.681,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "P95": {
           "lag": 9,
-          "corr": 0.538,
-          "n": 43,
+          "corr": 0.504,
+          "n": 42,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -773,13 +773,13 @@
             "corr": 0.72,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "P98": {
           "lag": 9,
-          "corr": 0.534,
-          "n": 43,
+          "corr": 0.499,
+          "n": 42,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -788,13 +788,13 @@
             "corr": 0.802,
             "n": 13
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "DSL": {
           "lag": 7,
-          "corr": 0.82,
-          "n": 44,
+          "corr": 0.881,
+          "n": 43,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -803,13 +803,13 @@
             "corr": 0.952,
             "n": 14
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         },
         "PDSL": {
           "lag": 6,
-          "corr": 0.815,
-          "n": 45,
+          "corr": 0.832,
+          "n": 44,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -818,7 +818,7 @@
             "corr": 0.802,
             "n": 14
           },
-          "pairs": 88,
+          "pairs": 87,
           "days": 88
         }
       }
@@ -839,7 +839,7 @@
             "n": 14
           },
           "pairs": 74,
-          "days": 74
+          "days": 75
         },
         "P95": {
           "lag": 13,
@@ -854,7 +854,7 @@
             "n": 14
           },
           "pairs": 74,
-          "days": 74
+          "days": 75
         },
         "P98": {
           "lag": 13,
@@ -869,7 +869,7 @@
             "n": 14
           },
           "pairs": 74,
-          "days": 74
+          "days": 75
         },
         "DSL": {
           "lag": 6,
@@ -884,7 +884,7 @@
             "n": 15
           },
           "pairs": 74,
-          "days": 74
+          "days": 75
         },
         "PDSL": {
           "lag": 5,
@@ -899,16 +899,16 @@
             "n": 15
           },
           "pairs": 74,
-          "days": 74
+          "days": 75
         }
       }
     },
     "ACT": {
       "metro": {
         "U91": {
-          "lag": 11,
-          "corr": 0.477,
-          "n": 39,
+          "lag": 13,
+          "corr": 0.469,
+          "n": 36,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -917,13 +917,13 @@
             "corr": 0.544,
             "n": 13
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         },
         "E10": {
-          "lag": 11,
-          "corr": 0.458,
-          "n": 39,
+          "lag": 13,
+          "corr": 0.471,
+          "n": 36,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -932,13 +932,13 @@
             "corr": 0.544,
             "n": 13
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         },
         "P95": {
-          "lag": 10,
-          "corr": 0.535,
-          "n": 38,
+          "lag": 11,
+          "corr": 0.507,
+          "n": 36,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -947,13 +947,13 @@
             "corr": 0.451,
             "n": 13
           },
-          "pairs": 85,
+          "pairs": 84,
           "days": 85
         },
         "P98": {
-          "lag": 11,
-          "corr": 0.454,
-          "n": 39,
+          "lag": 13,
+          "corr": 0.467,
+          "n": 36,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -962,13 +962,13 @@
             "corr": 0.56,
             "n": 13
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         },
         "DSL": {
           "lag": 5,
-          "corr": 0.741,
-          "n": 45,
+          "corr": 0.749,
+          "n": 44,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -977,13 +977,13 @@
             "corr": 0.697,
             "n": 14
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "PDSL": {
           "lag": 5,
-          "corr": 0.7,
-          "n": 47,
+          "corr": 0.71,
+          "n": 46,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -992,15 +992,15 @@
             "corr": 0.635,
             "n": 14
           },
-          "pairs": 89,
+          "pairs": 88,
           "days": 89
         }
       },
       "state": {
         "U91": {
-          "lag": 10,
-          "corr": 0.418,
-          "n": 38,
+          "lag": 12,
+          "corr": 0.379,
+          "n": 35,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -1009,13 +1009,13 @@
             "corr": 0.538,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "E10": {
-          "lag": 11,
-          "corr": 0.434,
-          "n": 37,
+          "lag": 12,
+          "corr": 0.421,
+          "n": 35,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -1024,13 +1024,13 @@
             "corr": 0.538,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "P95": {
           "lag": 10,
-          "corr": 0.491,
-          "n": 36,
+          "corr": 0.452,
+          "n": 35,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -1039,13 +1039,13 @@
             "corr": 0.462,
             "n": 13
           },
-          "pairs": 82,
+          "pairs": 81,
           "days": 82
         },
         "P98": {
-          "lag": 11,
-          "corr": 0.425,
-          "n": 37,
+          "lag": 12,
+          "corr": 0.4,
+          "n": 35,
           "soft": false,
           "source": "daily",
           "leadKey": "mogas95",
@@ -1054,13 +1054,13 @@
             "corr": 0.555,
             "n": 13
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         },
         "DSL": {
           "lag": 5,
-          "corr": 0.682,
-          "n": 43,
+          "corr": 0.689,
+          "n": 42,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -1069,13 +1069,13 @@
             "corr": 0.679,
             "n": 14
           },
-          "pairs": 83,
+          "pairs": 82,
           "days": 83
         },
         "PDSL": {
           "lag": 5,
-          "corr": 0.654,
-          "n": 43,
+          "corr": 0.653,
+          "n": 42,
           "soft": false,
           "source": "merged",
           "leadKey": "gasoil",
@@ -1084,13 +1084,13 @@
             "corr": 0.635,
             "n": 14
           },
-          "pairs": 86,
+          "pairs": 85,
           "days": 86
         }
       }
     }
   },
-  "generated": "2026-10-20T00:28:26.076Z",
+  "generated": "2026-10-20T23:59:29.480Z",
   "stats": {
     "hitCount": 68,
     "missCount": 76
