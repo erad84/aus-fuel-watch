@@ -1,6 +1,6 @@
 {
   "source": "NYMEX Singapore Mogas 95 / Gasoil (Platts) delayed settles; history reshaped from AIP weekly + Brent; FX Yahoo AUDUSD",
-  "updated": "2026-11-04",
+  "updated": "2026-11-05",
   "symbols": {
     "mogas95": "NYMEX:AV01!",
     "gasoil": "NYMEX:SGB1!"
@@ -13,11 +13,11 @@
       "NSW": 9,
       "VIC": 8,
       "QLD": 9,
-      "WA": 8,
+      "WA": 10,
       "SA": 10,
-      "TAS": 9,
+      "TAS": 14,
       "NT": 10,
-      "ACT": 10
+      "ACT": 11
     }
   },
   "days": [
@@ -3516,17 +3516,27 @@
       "gasoil": 148.2,
       "gasoilSource": "cme",
       "gasoilUsd": 164.517,
-      "fxAudUsd": 0.698178
+      "fxAudUsd": 0.69684
+    },
+    {
+      "date": "2026-11-05",
+      "mogas95": 106.2,
+      "mogas95Source": "cme",
+      "mogas95Usd": 118.469,
+      "gasoil": 143.5,
+      "gasoilSource": "cme",
+      "gasoilUsd": 160.109,
+      "fxAudUsd": 0.701607
     }
   ],
   "lastFetch": {
-    "at": "2026-11-04T01:30:51.606Z",
-    "liveIso": "2026-11-04",
+    "at": "2026-11-05T01:32:32.284Z",
+    "liveIso": "2026-11-05",
     "mogas95Usd": 118.469,
-    "gasoilUsd": 164.517,
-    "dayCount": 377,
-    "mogasCmeDays": 35,
-    "gasoilCmeDays": 35
+    "gasoilUsd": 160.109,
+    "dayCount": 378,
+    "mogasCmeDays": 36,
+    "gasoilCmeDays": 36
   },
-  "lagCalibUpdated": "2026-11-04T01:30:51.801Z"
+  "lagCalibUpdated": "2026-11-05T01:32:32.479Z"
 }
