@@ -413,12 +413,20 @@
       "tgp": 222.9,
       "gasoil": 154.8,
       "gasoilSource": "aip"
+    },
+    {
+      "weekEnding": "2026-11-06",
+      "mogas95": 101.7,
+      "source": "aip",
+      "tgp": 219.7,
+      "gasoil": 147.3,
+      "gasoilSource": "aip"
     }
   ],
   "lastFetch": {
-    "at": "2026-11-10T02:36:48.341Z",
-    "pdfCandidates": 24,
-    "pdfsParsed": 0,
-    "parsedRows": 0
+    "at": "2026-11-10T03:39:54.988Z",
+    "pdfCandidates": 53,
+    "pdfsParsed": 53,
+    "parsedRows": 106
   }
 }
