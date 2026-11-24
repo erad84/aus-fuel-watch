@@ -1,6 +1,6 @@
 {
   "source": "NYMEX Singapore Mogas 95 / Gasoil (Platts) delayed settles; history reshaped from AIP weekly + Brent; FX Yahoo AUDUSD",
-  "updated": "2026-11-21",
+  "updated": "2026-11-24",
   "symbols": {
     "mogas95": "NYMEX:AV01!",
     "gasoil": "NYMEX:SGB1!"
@@ -11,12 +11,12 @@
     "max": 21,
     "byState": {
       "NSW": 9,
-      "VIC": 9,
-      "QLD": 11,
-      "WA": 10,
-      "SA": 9,
+      "VIC": 21,
+      "QLD": 10,
+      "WA": 8,
+      "SA": 10,
       "TAS": 9,
-      "NT": 11,
+      "NT": 10,
       "ACT": 11
     }
   },
@@ -3611,31 +3611,31 @@
     {
       "date": "2026-11-14",
       "mogas95": 96.1,
-      "mogas95Source": "brent_extend",
+      "mogas95Source": "brent_reshape",
       "mogas95Usd": 104,
       "gasoil": 139.3,
-      "gasoilSource": "brent_extend",
+      "gasoilSource": "brent_reshape",
       "gasoilUsd": 150.752,
       "fxAudUsd": 0.68069
     },
     {
       "date": "2026-11-15",
       "mogas95": 96.1,
-      "mogas95Source": "brent_extend",
+      "mogas95Source": "brent_reshape",
       "mogas95Usd": 104,
       "gasoil": 139.3,
-      "gasoilSource": "brent_extend",
+      "gasoilSource": "brent_reshape",
       "gasoilUsd": 150.752,
       "fxAudUsd": 0.68069
     },
     {
       "date": "2026-11-16",
-      "mogas95": 92.7,
-      "mogas95Source": "brent_extend",
-      "mogas95Usd": 99.91,
-      "gasoil": 134.4,
-      "gasoilSource": "brent_extend",
-      "gasoilUsd": 144.853,
+      "mogas95": 92.9,
+      "mogas95Source": "brent_reshape",
+      "mogas95Usd": 100.125,
+      "gasoil": 135,
+      "gasoilSource": "brent_reshape",
+      "gasoilUsd": 145.499,
       "fxAudUsd": 0.6779
     },
     {
@@ -3677,16 +3677,56 @@
       "gasoilSource": "cme",
       "gasoilUsd": 149.761,
       "fxAudUsd": 0.665619
+    },
+    {
+      "date": "2026-11-21",
+      "mogas95": 93,
+      "mogas95Source": "brent_extend",
+      "mogas95Usd": 98.417,
+      "gasoil": 135.2,
+      "gasoilSource": "brent_extend",
+      "gasoilUsd": 143.075,
+      "fxAudUsd": 0.665619
+    },
+    {
+      "date": "2026-11-22",
+      "mogas95": 93,
+      "mogas95Source": "brent_extend",
+      "mogas95Usd": 98.417,
+      "gasoil": 135.2,
+      "gasoilSource": "brent_extend",
+      "gasoilUsd": 143.075,
+      "fxAudUsd": 0.665619
+    },
+    {
+      "date": "2026-11-23",
+      "mogas95": 89.8,
+      "mogas95Source": "brent_extend",
+      "mogas95Usd": 94.812,
+      "gasoil": 130.5,
+      "gasoilSource": "brent_extend",
+      "gasoilUsd": 137.784,
+      "fxAudUsd": 0.66409
+    },
+    {
+      "date": "2026-11-24",
+      "mogas95": 112.4,
+      "mogas95Source": "cme",
+      "mogas95Usd": 118.469,
+      "gasoil": 140.8,
+      "gasoilSource": "cme",
+      "gasoilUsd": 148.357,
+      "fxAudUsd": 0.662778
     }
   ],
   "lastFetch": {
-    "at": "2026-11-21T02:35:58.960Z",
-    "liveIso": "2026-11-20",
+    "at": "2026-11-24T04:40:53.499Z",
+    "liveIso": "2026-11-24",
     "mogas95Usd": 118.469,
-    "gasoilUsd": 149.761,
-    "dayCount": 393,
-    "mogasCmeDays": 46,
-    "gasoilCmeDays": 46
+    "gasoilUsd": 148.357,
+    "dayCount": 397,
+    "mogasCmeDays": 47,
+    "gasoilCmeDays": 47
   },
-  "lagCalibUpdated": "2026-11-21T02:35:59.106Z"
+  "lagCalibUpdated": "2026-11-24T04:40:53.657Z"
 }
